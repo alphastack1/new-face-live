@@ -47,6 +47,10 @@ const REGION_CLASSES = {
  * @param {ImageData} imgData - Source frame (RGBA)
  * @returns {{ tensor: Float32Array, scale: number, padW: number, padH: number }}
  */
+// Cached canvases for detection preprocessing (avoid per-frame allocation)
+let _detSrcCanvas = null, _detSrcCtx = null;
+let _detResCanvas = null, _detResCtx = null;
+
 export function preprocessDetect(imgData) {
   const { width: W, height: H, data } = imgData;
   const size = DET_INPUT_SIZE;
@@ -56,16 +60,21 @@ export function preprocessDetect(imgData) {
   const newW = Math.round(W * ratio);
   const newH = Math.round(H * ratio);
 
-  // Resize using offscreen canvas
-  const srcCanvas = new OffscreenCanvas(W, H);
-  const srcCtx = srcCanvas.getContext('2d');
-  srcCtx.putImageData(imgData, 0, 0);
+  // Resize using cached offscreen canvases
+  if (!_detSrcCanvas || _detSrcCanvas.width !== W || _detSrcCanvas.height !== H) {
+    _detSrcCanvas = new OffscreenCanvas(W, H);
+    _detSrcCtx = _detSrcCanvas.getContext('2d');
+  }
+  _detSrcCtx.putImageData(imgData, 0, 0);
 
-  const resCanvas = new OffscreenCanvas(size, size);
-  const resCtx = resCanvas.getContext('2d');
-  resCtx.drawImage(srcCanvas, 0, 0, W, H, 0, 0, newW, newH);
+  if (!_detResCanvas) {
+    _detResCanvas = new OffscreenCanvas(size, size);
+    _detResCtx = _detResCanvas.getContext('2d');
+  }
+  _detResCtx.clearRect(0, 0, size, size);
+  _detResCtx.drawImage(_detSrcCanvas, 0, 0, W, H, 0, 0, newW, newH);
 
-  const resized = resCtx.getImageData(0, 0, size, size);
+  const resized = _detResCtx.getImageData(0, 0, size, size);
   const px = resized.data;
 
   // Convert RGBA → RGB float32 NCHW, normalize: (px - 127.5) / 128.0

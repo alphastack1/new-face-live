@@ -37,17 +37,24 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);heigh
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden}
 
 /* ═══ LOADING SCREEN ═══ */
-.load-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;padding:24px;gap:16px}
+.load-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;padding:32px 24px;gap:0}
 .load-screen.hid{display:none}
-.load-title{font-size:18px;font-weight:600;color:var(--gold-l)}
-.load-sub{font-size:12px;color:var(--text2);text-align:center;max-width:320px}
-.prog-wrap{width:100%;max-width:360px}
+.load-hero{text-align:center;margin-bottom:28px}
+.load-title{font-size:28px;font-weight:700;letter-spacing:-.5px;color:var(--text);line-height:1.2;margin-bottom:8px}
+.load-title span{background:linear-gradient(135deg,var(--gold),var(--gold-l));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.load-sub{font-size:14px;color:var(--text2);line-height:1.5;max-width:380px;margin:0 auto}
+.load-features{display:flex;gap:20px;margin:20px 0 28px;flex-wrap:wrap;justify-content:center}
+.load-feat{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2)}
+.load-feat svg{width:14px;height:14px;color:var(--gold);flex-shrink:0}
+.prog-wrap{width:100%;max-width:380px;margin-bottom:12px}
 .prog-bar{height:6px;border-radius:3px;background:var(--surface2);overflow:hidden;margin-bottom:6px}
 .prog-fill{height:100%;background:linear-gradient(90deg,var(--gold-dk),var(--gold));border-radius:3px;transition:width .3s;width:0%}
 .prog-text{font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text2);text-align:center}
-.load-btn{margin-top:8px;padding:10px 24px;border-radius:var(--rs);border:1px solid var(--gold);background:linear-gradient(135deg,var(--gold-dk),var(--gold));color:#0a0a0f;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;transition:all .15s}
+.load-btn{padding:12px 32px;border-radius:var(--rs);border:1px solid var(--gold);background:linear-gradient(135deg,var(--gold-dk),var(--gold));color:#0a0a0f;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;transition:all .15s;box-shadow:0 0 20px rgba(232,175,72,.15)}
+.load-btn:hover{box-shadow:0 0 30px rgba(232,175,72,.3);transform:translateY(-1px)}
 .load-btn:active{transform:scale(.97)}
-.load-btn:disabled{opacity:.4;cursor:not-allowed}
+.load-btn:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none}
+.load-note{font-size:10px;color:var(--muted);margin-top:10px;text-align:center;max-width:300px;line-height:1.4}
 
 /* ═══ LIVE VIEW ═══ */
 .live-wrap{display:none;flex-direction:column;flex:1;overflow:hidden}
@@ -143,17 +150,21 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);heigh
 
 <!-- ═══ LOADING SCREEN ═══ -->
 <div class="load-screen" id="loadScreen">
-  <div class="logo-i" style="width:48px;height:48px;border-radius:12px">
-    <svg viewBox="0 0 24 24" fill="none" stroke="#0a0a0f" stroke-width="2" stroke-linecap="round" style="width:24px;height:24px"><path d="M12 2a10 10 0 0 0-7.07 17.07"/><circle cx="12" cy="10" r="3"/><path d="M6 20.09A10 10 0 0 0 22 12"/></svg>
+  <div class="load-hero">
+    <div class="load-title">See your <span>new look</span> instantly</div>
+    <div class="load-sub">Preview cosmetic changes to your nose, lips, eyes, and more — live on camera, powered by AI running entirely on your device.</div>
   </div>
-  <div class="load-title">NewFace</div>
-  <div class="load-sub">AI-powered cosmetic preview running entirely in your browser. No data leaves your device.</div>
+  <div class="load-features">
+    <div class="load-feat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>100% private</div>
+    <div class="load-feat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>Real-time camera</div>
+    <div class="load-feat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4m-7.07-2.93l2.83-2.83m8.48-8.48l2.83-2.83M2 12h4m12 0h4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83"/></svg>No install needed</div>
+  </div>
   <div class="prog-wrap" id="progWrap" style="display:none">
     <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
     <div class="prog-text" id="progText">Preparing...</div>
   </div>
-  <button class="load-btn" id="loadBtn" onclick="startLoading()">Download Models & Start</button>
-  <div style="font-size:10px;color:var(--muted);margin-top:4px" id="loadSize"></div>
+  <button class="load-btn" id="loadBtn" onclick="startLoading()">Get Started</button>
+  <div class="load-note" id="loadSize"></div>
 </div>
 
 <!-- ═══ LIVE VIEW ═══ -->
@@ -273,13 +284,12 @@ const loadBtn = document.getElementById('loadBtn');
 const loadSize = document.getElementById('loadSize');
 const video = document.getElementById('camVideo');
 const canvas = document.getElementById('camCanvas');
-const ctx = canvas.getContext('2d');
+const ctx = canvas.getContext('2d', { willReadFrequently: true });
 const overlay = document.getElementById('camOverlay');
 const refScroll = document.getElementById('refScroll');
 
 // Show total model size
-const totalMB = Math.round(564 / 1); // ~564 MB
-loadSize.textContent = `~564 MB download (cached after first use)`;
+loadSize.textContent = `One-time ~564 MB download — cached locally after first use`;
 
 // ── WASM paths for ORT ───────────────────────────────────────────
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/';
@@ -365,6 +375,7 @@ function stopCamera() {
 
 // ── Frame Processing Loop ────────────────────────────────────────
 let processing = false;
+let frameErrors = 0;
 
 async function processLoop() {
   if (!camRunning) return;
@@ -382,11 +393,9 @@ async function processLoop() {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       }
 
-      // Get frame data
-      const frameData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
       // Process if we have a reference
       if (engine.sourceLatent) {
+        const frameData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const result = await engine.processFrame(frameData);
         if (result) {
           ctx.putImageData(result, 0, 0);
@@ -398,12 +407,20 @@ async function processLoop() {
         ? `${engine.fps} FPS | ${engine.region}`
         : engine.region;
 
+      frameErrors = 0;
     } catch (err) {
+      frameErrors++;
       console.error('Frame error:', err);
+      if (frameErrors > 10) {
+        toast('Too many errors — stopping camera', 'err');
+        stopCamera();
+        return;
+      }
     }
     processing = false;
   }
 
+  // Schedule next frame — inference completes then we request the next
   animFrame = requestAnimationFrame(processLoop);
 }
 
@@ -608,8 +625,8 @@ import { checkCache } from './js/models.js';
   try {
     const { cached, missing } = await checkCache();
     if (missing.length === 0) {
-      loadSize.textContent = 'Models cached — ready to start!';
-      loadBtn.textContent = 'Start';
+      loadSize.textContent = 'Models already cached — ready to go!';
+      loadBtn.textContent = 'Launch';
     }
   } catch (e) { /* ignore */ }
 })();
