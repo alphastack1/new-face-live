@@ -262,9 +262,8 @@ export async function runSwap(session, alignedRGBA, sourceLatent) {
   const targetTensor = new ort.Tensor('float32', imgTensor, [1, 3, size, size]);
   const sourceTensor = new ort.Tensor('float32', sourceLatent, [1, 512]);
 
-  const feeds = {};
-  feeds[session.inputNames[0]] = targetTensor;
-  feeds[session.inputNames[1]] = sourceTensor;
+  // Use named feeds (safer than positional — input order may vary)
+  const feeds = { 'target': targetTensor, 'source': sourceTensor };
 
   const results = await session.run(feeds);
   const outData = results[session.outputNames[0]].data;

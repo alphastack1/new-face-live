@@ -404,11 +404,17 @@ async function processLoop() {
   // Start inference if not already running and we have a reference
   if (!processing && engine.sourceLatent) {
     processing = true;
-    // Capture frame data from current video draw
+    // Capture fresh video frame for inference
+    drawVideoFrame();
     const frameData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    const t0 = performance.now();
+    console.log('[Loop] Starting frame processing...');
 
     // Run inference async — don't block the render loop
     engine.processFrame(frameData).then(result => {
+      const ms = Math.round(performance.now() - t0);
+      console.log(`[Loop] Frame done in ${ms}ms, result: ${result ? 'yes' : 'null'}`);
       if (result) {
         lastResult = result;
       }
@@ -416,7 +422,7 @@ async function processLoop() {
       processing = false;
     }).catch(err => {
       frameErrors++;
-      console.error('Frame error:', err);
+      console.error('[Loop] Frame error:', err);
       processing = false;
       if (frameErrors > 10) {
         toast('Too many errors — stopping camera', 'err');

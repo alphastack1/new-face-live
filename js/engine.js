@@ -152,19 +152,25 @@ export class Engine {
     const { width: W, height: H } = frameData;
 
     // 1. Detect face in frame
+    console.log('[Frame] Step 1: Detecting face...');
     const face = await detectOneFace(this.detSession, frameData);
-    if (!face) return null;
+    if (!face) { console.log('[Frame] No face found'); return null; }
+    console.log(`[Frame] Face found in ${Math.round(performance.now() - t0)}ms`);
 
     // 2. Align target face to 128×128 for swapper
     const { data: aligned128, M } = alignFace(
       frameData.data, W, H, face.kps, 128
     );
+    console.log(`[Frame] Step 2: Aligned in ${Math.round(performance.now() - t0)}ms`);
 
     // 3. Run face swap
+    console.log('[Frame] Step 3: Running swap...');
     const swappedFace = await runSwap(this.swapSession, aligned128, this.sourceLatent);
+    console.log(`[Frame] Swap done in ${Math.round(performance.now() - t0)}ms`);
 
     // 4. Paste swapped face back into frame
     const fullSwapped = pasteBack(frameData.data, W, H, swappedFace, M);
+    console.log(`[Frame] Step 4: Pasted in ${Math.round(performance.now() - t0)}ms`);
 
     // 5. Regional masking (if not full-face swap)
     let result;
@@ -174,6 +180,7 @@ export class Engine {
       // Run parsing (every 3 frames or when bbox moves significantly)
       const needsParsing = this._shouldReparse(face.bbox);
       if (needsParsing) {
+        console.log('[Frame] Step 5: Running face parse...');
         const parsed = await parseFullFrame(this.parseSession, frameData, face.bbox);
         this._cachedParsing = parsed;
         this._cachedParsingBox = [...face.bbox];
@@ -189,6 +196,7 @@ export class Engine {
         result = blendRegion(frameData.data, fullSwapped, null, this.opacity, W, H);
       }
     }
+    console.log(`[Frame] Step 5: Blended in ${Math.round(performance.now() - t0)}ms`);
 
     // 6. Sharpening
     if (this.sharpness > 0) {
