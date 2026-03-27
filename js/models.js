@@ -9,8 +9,8 @@ const STORE_NAME = 'blobs';
 // Model registry — URLs will point to GitHub Releases on alphastack1/storage
 const MODEL_REGISTRY = {
   det_10g:    { file: 'det_10g.onnx',              size: 16_923_827 },
-  w600k_r50:  { file: 'w600k_r50.onnx',            size: 174_383_860 },
-  inswapper:  { file: 'inswapper_128.onnx',          size: 554_259_160 },
+  w600k_r50:  { file: 'w600k_r50.onnx',            size: 174_391_702 },
+  inswapper:  { file: 'inswapper_128.onnx',          size: 553_210_555 },
   bisenet:    { file: 'bisenet_resnet_34.onnx',     size: 93_632_546 },
   emap:       { file: 'emap.bin',                   size: 1_048_576 },
 };
@@ -136,39 +136,15 @@ export async function loadModelBytes(name, onProgress) {
 export async function loadSession(name, onProgress) {
   const buf = await loadModelBytes(name, onProgress);
 
-  console.log(`[Models] ${name}: navigator.gpu = ${!!navigator.gpu}`);
   if (!navigator.gpu) {
     throw new Error(`WebGPU not available. Please use Chrome 113+ with WebGPU enabled.`);
   }
 
-  // Try WebGPU first — fall back to WASM only if WebGPU can't handle this model
-  try {
-    console.log(`[Models] ${name}: creating WebGPU session...`);
-    const session = await ort.InferenceSession.create(buf.slice(0), {
-      executionProviders: ['webgpu'],
-    });
-    console.log(`[Models] ✅ ${name} loaded (WebGPU)`);
-    return session;
-  } catch (e) {
-    console.warn(`[Models] ⚠️ ${name} WebGPU failed (error: ${e?.message || e}), falling back to WASM`);
-  }
-
+  console.log(`[Models] ${name}: creating WebGPU session...`);
   const session = await ort.InferenceSession.create(buf, {
-    executionProviders: ['wasm'],
+    executionProviders: ['webgpu'],
   });
-  console.log(`[Models] ${name} loaded (WASM fallback)`);
-  return session;
-}
-
-/**
- * Force-create a WASM session for a model (used as runtime fallback when WebGPU inference fails).
- */
-export async function loadSessionWasm(name) {
-  const buf = await loadModelBytes(name, () => {});
-  const session = await ort.InferenceSession.create(buf, {
-    executionProviders: ['wasm'],
-  });
-  console.log(`[Models] ${name} reloaded (WASM fallback)`);
+  console.log(`[Models] ✅ ${name} loaded (WebGPU)`);
   return session;
 }
 

@@ -3,12 +3,12 @@
  * Manages model loading, camera, frame processing loop.
  */
 
-import { loadSession, loadSessionWasm, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=5';
+import { loadSession, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=6';
 import {
   detectOneFace, alignFace, extractEmbedding, projectEmbedding,
   runSwap, pasteBack, parseFullFrame, createRegionMask,
   blendRegion, sharpen,
-} from './pipeline.js?v=5';
+} from './pipeline.js?v=6';
 
 export class Engine {
   constructor() {
@@ -115,15 +115,8 @@ export class Engine {
     ctx.drawImage(img, 0, 0);
     const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-    // Detect face (with WASM fallback if WebGPU fails at runtime)
-    let face;
-    try {
-      face = await detectOneFace(this.detSession, imgData);
-    } catch (e) {
-      console.warn('[Engine] detect failed, falling back to WASM:', e?.message);
-      this.detSession = await loadSessionWasm('det_10g');
-      face = await detectOneFace(this.detSession, imgData);
-    }
+    // Detect face
+    const face = await detectOneFace(this.detSession, imgData);
     if (!face) {
       console.warn('[Engine] No face detected in reference image');
       return false;
@@ -134,14 +127,8 @@ export class Engine {
       imgData.data, imgData.width, imgData.height, face.kps, 112
     );
 
-    // Extract embedding (with WASM fallback)
-    try {
-      this.sourceEmbedding = await extractEmbedding(this.recSession, alignedRGBA);
-    } catch (e) {
-      console.warn('[Engine] embedding failed, falling back to WASM:', e?.message);
-      this.recSession = await loadSessionWasm('w600k_r50');
-      this.sourceEmbedding = await extractEmbedding(this.recSession, alignedRGBA);
-    }
+    // Extract embedding
+    this.sourceEmbedding = await extractEmbedding(this.recSession, alignedRGBA);
 
     // Project through emap
     this.sourceLatent = projectEmbedding(this.sourceEmbedding, this.emap);
@@ -167,18 +154,8 @@ export class Engine {
     // Yield helper — lets RAF callbacks fire so the video stays live
     const yieldToUI = () => new Promise(r => setTimeout(r, 0));
 
-    // 1. Detect face in frame (with WASM fallback — cached)
-    let face;
-    try {
-      face = await detectOneFace(this.detSession, frameData);
-    } catch (e) {
-      console.warn('[Frame] detect failed, falling back to WASM:', e?.message);
-      if (!this._detWasmSession) {
-        this._detWasmSession = await loadSessionWasm('det_10g');
-      }
-      this.detSession = this._detWasmSession;
-      face = await detectOneFace(this.detSession, frameData);
-    }
+    // 1. Detect face in frame
+    const face = await detectOneFace(this.detSession, frameData);
     if (!face) return null;
     console.log(`[Frame] detect ${Math.round(performance.now() - t0)}ms`);
     await yieldToUI();
@@ -188,19 +165,8 @@ export class Engine {
       frameData.data, W, H, face.kps, 128
     );
 
-    // 3. Run face swap (with WASM fallback — cached, not reloaded per-frame)
-    let swappedFace;
-    try {
-      swappedFace = await runSwap(this.swapSession, aligned128, this.sourceLatent);
-    } catch (e) {
-      console.warn('[Frame] swap failed, falling back to WASM:', e?.message);
-      if (!this._swapWasmSession) {
-        console.log('[Frame] Loading WASM fallback for inswapper (one-time)...');
-        this._swapWasmSession = await loadSessionWasm('inswapper');
-      }
-      this.swapSession = this._swapWasmSession;
-      swappedFace = await runSwap(this.swapSession, aligned128, this.sourceLatent);
-    }
+    // 3. Run face swap
+    const swappedFace = await runSwap(this.swapSession, aligned128, this.sourceLatent);
     console.log(`[Frame] swap ${Math.round(performance.now() - t0)}ms`);
     await yieldToUI();
 
@@ -216,14 +182,7 @@ export class Engine {
       const needsParsing = this._shouldReparse(face.bbox);
       if (needsParsing) {
         await yieldToUI();
-        let parsed;
-        try {
-          parsed = await parseFullFrame(this.parseSession, frameData, face.bbox);
-        } catch (e) {
-          console.warn('[Frame] parse failed, falling back to WASM:', e?.message);
-          this.parseSession = await loadSessionWasm('bisenet');
-          parsed = await parseFullFrame(this.parseSession, frameData, face.bbox);
-        }
+        const parsed = await parseFullFrame(this.parseSession, frameData, face.bbox);
         this._cachedParsing = parsed;
         this._cachedParsingBox = [...face.bbox];
         console.log(`[Frame] parse ${Math.round(performance.now() - t0)}ms`);
