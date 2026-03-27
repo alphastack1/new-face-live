@@ -3,12 +3,12 @@
  * Manages model loading, camera, frame processing loop.
  */
 
-import { loadSession, loadSessionWasm, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=4';
+import { loadSession, loadSessionWasm, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=5';
 import {
   detectOneFace, alignFace, extractEmbedding, projectEmbedding,
   runSwap, pasteBack, parseFullFrame, createRegionMask,
   blendRegion, sharpen,
-} from './pipeline.js?v=4';
+} from './pipeline.js?v=5';
 
 export class Engine {
   constructor() {

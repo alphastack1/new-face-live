@@ -6,7 +6,7 @@
 import {
   estimateSimilarityTransform, invertAffine, affinePoint,
   warpAffine, warpAffineMask, nms, vecNormalize, matVecMul,
-} from './math.js?v=4';
+} from './math.js?v=5';
 
 // ── Constants ──────────────────────────────────────────────────────
 
