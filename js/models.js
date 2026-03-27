@@ -136,17 +136,27 @@ export async function loadModelBytes(name, onProgress) {
 export async function loadSession(name, onProgress) {
   const buf = await loadModelBytes(name, onProgress);
 
-  // WebGPU REQUIRED — no WASM fallback (WASM is 20s/frame, unusable)
-  console.log(`[Models] ${name}: navigator.gpu = ${!!navigator.gpu}, typeof = ${typeof navigator.gpu}`);
+  console.log(`[Models] ${name}: navigator.gpu = ${!!navigator.gpu}`);
   if (!navigator.gpu) {
-    throw new Error(`WebGPU not available in this browser. navigator.gpu = ${navigator.gpu}. Please use Chrome 113+ with WebGPU enabled.`);
+    throw new Error(`WebGPU not available. Please use Chrome 113+ with WebGPU enabled.`);
   }
 
-  console.log(`[Models] ${name}: creating WebGPU session...`);
-  const session = await ort.InferenceSession.create(buf.slice(0), {
-    executionProviders: ['webgpu'],
+  // Try WebGPU first — fall back to WASM only if WebGPU can't handle this model
+  try {
+    console.log(`[Models] ${name}: creating WebGPU session...`);
+    const session = await ort.InferenceSession.create(buf.slice(0), {
+      executionProviders: ['webgpu'],
+    });
+    console.log(`[Models] ✅ ${name} loaded (WebGPU)`);
+    return session;
+  } catch (e) {
+    console.warn(`[Models] ⚠️ ${name} WebGPU failed (error: ${e?.message || e}), falling back to WASM`);
+  }
+
+  const session = await ort.InferenceSession.create(buf, {
+    executionProviders: ['wasm'],
   });
-  console.log(`[Models] ${name} loaded (WebGPU) ✓`);
+  console.log(`[Models] ${name} loaded (WASM fallback)`);
   return session;
 }
 
