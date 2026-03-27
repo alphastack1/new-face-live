@@ -1,0 +1,27 @@
+# Models (large, downloaded separately)
+models/
+*.onnx
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Runtime data
+uploads/
+results/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Misc
+*.log
+ffmpeg_local/

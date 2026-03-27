@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>NewFace — Cosmetic Preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #08080c; --bg2: #0c0c12; --bg3: #101018;
+  --surface: rgba(16,16,24,0.8); --surface2: rgba(24,24,36,0.7);
+  --gold: #e8af48; --gold-l: #feeaa3; --gold-d: #c49746; --gold-dk: #533517;
+  --glow: rgba(232,175,72,0.15); --glow-s: rgba(232,175,72,0.3);
+  --text: #f0ece4; --text2: #a8a4a0; --muted: #6b6865;
+  --border: rgba(232,175,72,0.12); --border2: rgba(232,175,72,0.25);
+  --green: #4ade80; --red: #f87171;
+  --r: 12px; --rs: 8px;
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{height:100%;overflow:hidden}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);height:100%;overflow:hidden;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column}
+
+/* ═══ HEADER ═══ */
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:0 12px;height:36px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0;z-index:50}
+.logo{display:flex;align-items:center;gap:8px}
+.logo-i{width:22px;height:22px;border-radius:5px;background:linear-gradient(135deg,var(--gold),var(--gold-dk));display:flex;align-items:center;justify-content:center}
+.logo-i svg{width:11px;height:11px}
+.logo-t{font-size:14px;font-weight:600;letter-spacing:-.4px}
+.logo-t span{color:var(--gold)}
+.st{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text2);font-family:'JetBrains Mono',monospace}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--muted);transition:background .3s}
+.dot.ok{background:var(--green);box-shadow:0 0 6px rgba(74,222,128,.5)}
+.dot.ld{background:var(--gold);animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* ═══ MAIN ═══ */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+
+/* ═══ LOADING SCREEN ═══ */
+.load-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;padding:24px;gap:16px}
+.load-screen.hid{display:none}
+.load-title{font-size:18px;font-weight:600;color:var(--gold-l)}
+.load-sub{font-size:12px;color:var(--text2);text-align:center;max-width:320px}
+.prog-wrap{width:100%;max-width:360px}
+.prog-bar{height:6px;border-radius:3px;background:var(--surface2);overflow:hidden;margin-bottom:6px}
+.prog-fill{height:100%;background:linear-gradient(90deg,var(--gold-dk),var(--gold));border-radius:3px;transition:width .3s;width:0%}
+.prog-text{font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text2);text-align:center}
+.load-btn{margin-top:8px;padding:10px 24px;border-radius:var(--rs);border:1px solid var(--gold);background:linear-gradient(135deg,var(--gold-dk),var(--gold));color:#0a0a0f;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;transition:all .15s}
+.load-btn:active{transform:scale(.97)}
+.load-btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* ═══ LIVE VIEW ═══ */
+.live-wrap{display:none;flex-direction:column;flex:1;overflow:hidden}
+.live-wrap.on{display:flex}
+.cam-box{position:relative;flex:1;min-height:0;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.cam-box canvas{width:100%;height:100%;object-fit:contain;transform-origin:center center;touch-action:none}
+.cam-box video{display:none}
+.cam-overlay{position:absolute;top:8px;left:8px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text2);background:rgba(0,0,0,.5);padding:2px 6px;border-radius:4px;pointer-events:none;z-index:5}
+
+/* Camera action bar */
+.cam-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg2);border-top:1px solid var(--border);flex-shrink:0}
+.cam-bar .b{flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:9px 0;border-radius:var(--rs);border:1px solid var(--border2);background:var(--surface2);color:var(--text);font-size:12px;font-weight:500;font-family:inherit;cursor:pointer;transition:all .15s;-webkit-tap-highlight-color:transparent}
+.cam-bar .b:active{transform:scale(.97)}
+.cam-bar .b.pri{background:linear-gradient(135deg,var(--gold-dk),var(--gold));border-color:var(--gold);color:#0a0a0f;font-weight:600}
+.cam-bar .b.stop{border-color:var(--red);color:var(--red)}
+.cam-bar .b svg{width:16px;height:16px}
+
+/* ═══ CONTROLS ═══ */
+.ctrl{flex-shrink:0;background:var(--bg2);border-top:1px solid var(--border);max-height:45vh;overflow-y:auto}
+.ctrl-section{padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.03)}
+.ctrl-section:last-child{border-bottom:none}
+.ctrl-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:6px}
+
+/* Region pills */
+.pills{display:flex;flex-wrap:wrap;gap:5px}
+.pill{padding:6px 12px;border-radius:16px;border:1px solid var(--border);background:var(--surface);color:var(--text2);font-size:11px;font-weight:500;cursor:pointer;transition:all .2s;-webkit-tap-highlight-color:transparent}
+.pill.on{background:var(--glow);color:var(--gold-l);border-color:var(--gold);box-shadow:0 0 8px var(--glow)}
+
+/* Sliders */
+.sl-row{display:flex;align-items:center;gap:10px}
+.sl-row input[type="range"]{flex:1;-webkit-appearance:none;height:4px;border-radius:2px;background:var(--surface2);outline:none}
+.sl-row input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:var(--gold);border:2px solid var(--bg);box-shadow:0 0 6px var(--glow-s);cursor:grab}
+.sl-val{font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--gold);min-width:32px;text-align:right}
+
+/* Category tabs */
+.cat-tabs{display:flex;gap:3px;overflow-x:auto;padding-bottom:6px;-webkit-overflow-scrolling:touch}
+.cat-tabs::-webkit-scrollbar{display:none}
+.cat-tab{padding:4px 10px;border-radius:12px;border:1px solid var(--border);background:none;color:var(--muted);font-size:10px;font-weight:600;font-family:inherit;cursor:pointer;white-space:nowrap;transition:all .15s;-webkit-tap-highlight-color:transparent;text-transform:uppercase;letter-spacing:.5px}
+.cat-tab.on{color:var(--gold-l);background:var(--glow);border-color:var(--gold)}
+
+/* Reference scroll */
+.ref-scroll{display:flex;gap:6px;overflow-x:auto;padding:4px 0;-webkit-overflow-scrolling:touch}
+.ref-scroll::-webkit-scrollbar{display:none}
+.ref-c{width:60px;height:60px;border-radius:var(--rs);overflow:hidden;cursor:pointer;border:2px solid transparent;transition:all .15s;flex-shrink:0}
+.ref-c img{width:100%;height:100%;object-fit:cover}
+.ref-c:hover{border-color:var(--gold-d)}
+.ref-c.sel{border-color:var(--gold);box-shadow:0 0 10px var(--glow-s)}
+
+/* Toggle */
+.tog-row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.03)}
+.tog-row:last-child{border-bottom:none}
+.tog-row span{font-size:11px;color:var(--text2)}
+.tog{position:relative;width:36px;height:20px;cursor:pointer;flex-shrink:0}
+.tog input{opacity:0;width:0;height:0}
+.tog .s{position:absolute;inset:0;background:var(--surface2);border-radius:10px;transition:.3s}
+.tog .s::before{content:'';position:absolute;height:14px;width:14px;left:3px;bottom:3px;background:var(--muted);border-radius:50%;transition:.3s}
+.tog input:checked+.s{background:var(--gold-dk)}
+.tog input:checked+.s::before{transform:translateX(16px);background:var(--gold)}
+
+/* Toast */
+.toasts{position:fixed;bottom:8px;left:8px;right:8px;z-index:10000;display:flex;flex-direction:column;gap:4px;pointer-events:none}
+.toast{padding:8px 12px;border-radius:var(--rs);font-size:11px;color:var(--text);background:var(--surface);backdrop-filter:blur(16px);border:1px solid var(--border);animation:ti .2s;box-shadow:0 4px 12px rgba(0,0,0,.5);pointer-events:auto}
+.toast.ok{border-color:var(--green);color:var(--green)}
+.toast.err{border-color:var(--red);color:var(--red)}
+@keyframes ti{from{transform:translateY(16px);opacity:0}to{transform:translateY(0);opacity:1}}
+
+::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--surface2);border-radius:2px}
+
+/* ═══ DESKTOP 768px+ ═══ */
+@media(min-width:768px){
+  .hdr{height:44px;padding:0 20px}
+  .live-wrap{flex-direction:row}
+  .cam-box{flex:1}
+  .ctrl{max-height:none;width:320px;border-top:none;border-left:1px solid var(--border);overflow-y:auto}
+  .cam-bar{position:absolute;bottom:0;left:0;right:0;background:rgba(8,8,12,.7);backdrop-filter:blur(8px);border-top:1px solid rgba(255,255,255,.05);z-index:10}
+  .ref-c{width:72px;height:72px}
+  .toasts{bottom:16px;left:auto;right:16px;width:300px}
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="hdr">
+  <div class="logo">
+    <div class="logo-i"><svg viewBox="0 0 24 24" fill="none" stroke="#0a0a0f" stroke-width="2.5" stroke-linecap="round"><path d="M12 2a10 10 0 0 0-7.07 17.07"/><circle cx="12" cy="10" r="3"/><path d="M6 20.09A10 10 0 0 0 22 12"/></svg></div>
+    <div class="logo-t">New<span>Face</span></div>
+  </div>
+  <div class="st"><div class="dot" id="dot"></div><span id="stTxt">Loading...</span></div>
+</header>
+
+<div class="main">
+
+<!-- ═══ LOADING SCREEN ═══ -->
+<div class="load-screen" id="loadScreen">
+  <div class="logo-i" style="width:48px;height:48px;border-radius:12px">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#0a0a0f" stroke-width="2" stroke-linecap="round" style="width:24px;height:24px"><path d="M12 2a10 10 0 0 0-7.07 17.07"/><circle cx="12" cy="10" r="3"/><path d="M6 20.09A10 10 0 0 0 22 12"/></svg>
+  </div>
+  <div class="load-title">NewFace</div>
+  <div class="load-sub">AI-powered cosmetic preview running entirely in your browser. No data leaves your device.</div>
+  <div class="prog-wrap" id="progWrap" style="display:none">
+    <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
+    <div class="prog-text" id="progText">Preparing...</div>
+  </div>
+  <button class="load-btn" id="loadBtn" onclick="startLoading()">Download Models & Start</button>
+  <div style="font-size:10px;color:var(--muted);margin-top:4px" id="loadSize"></div>
+</div>
+
+<!-- ═══ LIVE VIEW ═══ -->
+<div class="live-wrap" id="liveWrap">
+  <div class="cam-box" id="camBox">
+    <video id="camVideo" playsinline autoplay muted></video>
+    <canvas id="camCanvas"></canvas>
+    <div class="cam-overlay" id="camOverlay"></div>
+  </div>
+
+  <!-- Action bar -->
+  <div class="cam-bar">
+    <button class="b pri" id="btnStart" onclick="toggleCamera()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+      Start
+    </button>
+    <button class="b" onclick="toggleMirror()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg>
+      Mirror
+    </button>
+  </div>
+
+  <!-- Controls -->
+  <div class="ctrl">
+    <!-- Region -->
+    <div class="ctrl-section">
+      <div class="ctrl-label">Region</div>
+      <div class="pills" id="regionPills">
+        <div class="pill on" data-r="nose" onclick="setRegion('nose')">Nose</div>
+        <div class="pill" data-r="lips" onclick="setRegion('lips')">Lips</div>
+        <div class="pill" data-r="eyes" onclick="setRegion('eyes')">Eyes</div>
+        <div class="pill" data-r="brow" onclick="setRegion('brow')">Brow</div>
+        <div class="pill" data-r="chin" onclick="setRegion('chin')">Chin</div>
+        <div class="pill" data-r="full" onclick="setRegion('full')">Full</div>
+      </div>
+    </div>
+
+    <!-- Opacity -->
+    <div class="ctrl-section">
+      <div class="ctrl-label">Blend Opacity</div>
+      <div class="sl-row">
+        <input type="range" min="0" max="100" value="70" id="opacitySlider" oninput="setOpacity(this.value)">
+        <div class="sl-val" id="opacityVal">70%</div>
+      </div>
+    </div>
+
+    <!-- Sharpness -->
+    <div class="ctrl-section">
+      <div class="ctrl-label">Sharpness</div>
+      <div class="sl-row">
+        <input type="range" min="0" max="100" value="0" id="sharpSlider" oninput="setSharpness(this.value)">
+        <div class="sl-val" id="sharpVal">0</div>
+      </div>
+    </div>
+
+    <!-- References -->
+    <div class="ctrl-section">
+      <div class="ctrl-label">Reference Face</div>
+      <div class="cat-tabs" id="catTabs">
+        <button class="cat-tab on" data-cat="nose" onclick="setCat('nose')">Nose</button>
+        <button class="cat-tab" data-cat="lips" onclick="setCat('lips')">Lips</button>
+        <button class="cat-tab" data-cat="eyes" onclick="setCat('eyes')">Eyes</button>
+        <button class="cat-tab" data-cat="brow" onclick="setCat('brow')">Brow</button>
+        <button class="cat-tab" data-cat="chin" onclick="setCat('chin')">Chin</button>
+      </div>
+      <div class="ref-scroll" id="refScroll"></div>
+    </div>
+
+    <!-- Settings -->
+    <div class="ctrl-section">
+      <div class="ctrl-label">Settings</div>
+      <div class="tog-row">
+        <span>Mirror Camera</span>
+        <label class="tog"><input type="checkbox" id="mirrorTog" checked onchange="toggleMirror()"><span class="s"></span></label>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div><!-- .main -->
+
+<div class="toasts" id="toasts"></div>
+
+<!-- ORT WebGPU -->
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.webgpu.min.js"></script>
+
+<script type="module">
+import { Engine } from './js/engine.js';
+
+// ── Reference images registry ────────────────────────────────────
+const REFS = {
+  nose: ['nose_ref_1.jpg','nose_ref_2.jpg','nose_ref_3.jpg','nose_ref_4.jpg','nose_ref_5.jpg','nose_ref_6.jpg'],
+  lips: ['lips_ref_1.jpg','lips_ref_2.jpg','lips_ref_3.jpg','lips_ref_4.jpg'],
+  eyes: ['eyes_ref_1.jpg','eyes_ref_2.jpg','eyes_ref_3.jpg'],
+  brow: ['brow_ref_1.jpg','brow_ref_2.jpg','brow_ref_3.jpg'],
+  chin: ['chin_ref_1.jpg','chin_ref_2.jpg','chin_ref_3.jpg'],
+};
+
+// ── State ────────────────────────────────────────────────────────
+const engine = new Engine();
+let camStream = null;
+let camRunning = false;
+let animFrame = null;
+let currentCat = 'nose';
+let currentRef = null;
+let mirror = true;
+
+// DOM
+const dot = document.getElementById('dot');
+const stTxt = document.getElementById('stTxt');
+const loadScreen = document.getElementById('loadScreen');
+const liveWrap = document.getElementById('liveWrap');
+const progWrap = document.getElementById('progWrap');
+const progFill = document.getElementById('progFill');
+const progText = document.getElementById('progText');
+const loadBtn = document.getElementById('loadBtn');
+const loadSize = document.getElementById('loadSize');
+const video = document.getElementById('camVideo');
+const canvas = document.getElementById('camCanvas');
+const ctx = canvas.getContext('2d');
+const overlay = document.getElementById('camOverlay');
+const refScroll = document.getElementById('refScroll');
+
+// Show total model size
+const totalMB = Math.round(564 / 1); // ~564 MB
+loadSize.textContent = `~564 MB download (cached after first use)`;
+
+// ── WASM paths for ORT ───────────────────────────────────────────
+ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/';
+
+// ── Loading ──────────────────────────────────────────────────────
+window.startLoading = async function() {
+  loadBtn.disabled = true;
+  loadBtn.textContent = 'Loading...';
+  progWrap.style.display = '';
+  dot.className = 'dot ld';
+  stTxt.textContent = 'Downloading models...';
+
+  try {
+    await engine.init((name, loaded, total, overallPct) => {
+      const pct = Math.round(overallPct * 100);
+      progFill.style.width = pct + '%';
+      const mb = (loaded / 1048576).toFixed(1);
+      const totalMb = (total / 1048576).toFixed(0);
+      progText.textContent = `${name}: ${mb}/${totalMb} MB (${pct}% overall)`;
+    });
+
+    // Models loaded — switch to live view
+    dot.className = 'dot ok';
+    stTxt.textContent = 'Ready';
+    loadScreen.classList.add('hid');
+    liveWrap.classList.add('on');
+    loadPrefs();
+    renderRefs();
+    toast('Models loaded! Tap Start to begin.', 'ok');
+  } catch (err) {
+    console.error('Model load error:', err);
+    const msg = err?.message || String(err);
+    dot.className = 'dot';
+    stTxt.textContent = 'Error';
+    progText.textContent = 'Error: ' + msg;
+    loadBtn.disabled = false;
+    loadBtn.textContent = 'Retry';
+    toast('Failed to load models: ' + msg, 'err');
+  }
+};
+
+// ── Camera ───────────────────────────────────────────────────────
+window.toggleCamera = async function() {
+  if (camRunning) {
+    stopCamera();
+    return;
+  }
+
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false,
+    });
+    video.srcObject = camStream;
+    await video.play();
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    camRunning = true;
+    const btn = document.getElementById('btnStart');
+    btn.className = 'b stop';
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/></svg> Stop';
+
+    processLoop();
+  } catch (err) {
+    toast('Camera access denied: ' + err.message, 'err');
+  }
+};
+
+function stopCamera() {
+  camRunning = false;
+  if (animFrame) cancelAnimationFrame(animFrame);
+  if (camStream) {
+    camStream.getTracks().forEach(t => t.stop());
+    camStream = null;
+  }
+  video.srcObject = null;
+  const btn = document.getElementById('btnStart');
+  btn.className = 'b pri';
+  btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg> Start';
+}
+
+// ── Frame Processing Loop ────────────────────────────────────────
+let processing = false;
+
+async function processLoop() {
+  if (!camRunning) return;
+
+  if (!processing) {
+    processing = true;
+    try {
+      // Draw video to canvas
+      if (mirror) {
+        ctx.save();
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+        ctx.restore();
+      } else {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      }
+
+      // Get frame data
+      const frameData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+      // Process if we have a reference
+      if (engine.sourceLatent) {
+        const result = await engine.processFrame(frameData);
+        if (result) {
+          ctx.putImageData(result, 0, 0);
+        }
+      }
+
+      // Update overlay
+      overlay.textContent = engine.fps > 0
+        ? `${engine.fps} FPS | ${engine.region}`
+        : engine.region;
+
+    } catch (err) {
+      console.error('Frame error:', err);
+    }
+    processing = false;
+  }
+
+  animFrame = requestAnimationFrame(processLoop);
+}
+
+// ── Region ───────────────────────────────────────────────────────
+window.setRegion = function(r) {
+  engine.region = r;
+  document.querySelectorAll('.pill').forEach(p => {
+    p.classList.toggle('on', p.dataset.r === r);
+  });
+  savePrefs();
+};
+
+// ── Opacity ──────────────────────────────────────────────────────
+window.setOpacity = function(v) {
+  engine.opacity = v / 100;
+  document.getElementById('opacityVal').textContent = v + '%';
+  savePrefs();
+};
+
+// ── Sharpness ────────────────────────────────────────────────────
+window.setSharpness = function(v) {
+  engine.sharpness = parseInt(v);
+  document.getElementById('sharpVal').textContent = v;
+  savePrefs();
+};
+
+// ── Mirror ───────────────────────────────────────────────────────
+window.toggleMirror = function() {
+  mirror = !mirror;
+  document.getElementById('mirrorTog').checked = mirror;
+  savePrefs();
+};
+
+// ── Reference Category & Selection ───────────────────────────────
+window.setCat = function(cat) {
+  currentCat = cat;
+  document.querySelectorAll('.cat-tab').forEach(t => {
+    t.classList.toggle('on', t.dataset.cat === cat);
+  });
+  renderRefs();
+
+  // Auto-set region to match category
+  setRegion(cat);
+};
+
+function renderRefs() {
+  const files = REFS[currentCat] || [];
+  refScroll.innerHTML = '';
+
+  files.forEach(fn => {
+    const div = document.createElement('div');
+    div.className = 'ref-c' + (fn === currentRef ? ' sel' : '');
+    div.innerHTML = `<img src="references/${fn}" alt="${fn}" loading="lazy">`;
+    div.onclick = () => selectRef(fn);
+    refScroll.appendChild(div);
+  });
+}
+
+async function selectRef(fn) {
+  currentRef = fn;
+
+  // Update UI
+  document.querySelectorAll('.ref-c').forEach(c => {
+    c.classList.toggle('sel', c.querySelector('img')?.src.endsWith(fn));
+  });
+
+  // Set reference in engine
+  toast('Setting reference...', '');
+  const ok = await engine.setReference('references/' + fn);
+  if (ok) {
+    toast('Reference set: ' + fn, 'ok');
+  } else {
+    toast('No face detected in reference', 'err');
+  }
+  savePrefs();
+}
+
+// ── Preferences (localStorage) ──────────────────────────────────
+function savePrefs() {
+  localStorage.setItem('nf_prefs', JSON.stringify({
+    region: engine.region,
+    opacity: Math.round(engine.opacity * 100),
+    sharpness: engine.sharpness,
+    mirror: mirror,
+    cat: currentCat,
+    ref: currentRef,
+  }));
+}
+
+function loadPrefs() {
+  try {
+    const p = JSON.parse(localStorage.getItem('nf_prefs'));
+    if (!p) return;
+
+    if (p.region) setRegion(p.region);
+    if (p.opacity != null) {
+      document.getElementById('opacitySlider').value = p.opacity;
+      setOpacity(p.opacity);
+    }
+    if (p.sharpness != null) {
+      document.getElementById('sharpSlider').value = p.sharpness;
+      setSharpness(p.sharpness);
+    }
+    if (p.mirror != null) {
+      mirror = p.mirror;
+      document.getElementById('mirrorTog').checked = mirror;
+    }
+    if (p.cat) setCat(p.cat);
+    if (p.ref) {
+      currentRef = p.ref;
+      // Defer reference loading until after render
+      setTimeout(() => selectRef(p.ref), 500);
+    }
+  } catch (e) { /* ignore */ }
+}
+
+// ── Toast ────────────────────────────────────────────────────────
+function toast(msg, type) {
+  const el = document.createElement('div');
+  el.className = 'toast' + (type ? ' ' + type : '');
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+window.toast = toast;
+
+// ── Zoom (scroll wheel + pinch + middle-mouse drag + touch-hold pan) ──
+{
+  const box = document.getElementById('camBox');
+  const c = canvas;
+  let scale = 1, panX = 0, panY = 0;
+  let isPanning = false, startX = 0, startY = 0;
+
+  function updateTransform() {
+    c.style.transform = `scale(${scale}) translate(${panX}px, ${panY}px)`;
+  }
+
+  // Scroll wheel zoom
+  box.addEventListener('wheel', e => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    scale = Math.max(1, Math.min(5, scale * delta));
+    if (scale === 1) { panX = 0; panY = 0; }
+    updateTransform();
+  }, { passive: false });
+
+  // Middle mouse drag
+  box.addEventListener('mousedown', e => {
+    if (e.button === 1) { e.preventDefault(); isPanning = true; startX = e.clientX - panX; startY = e.clientY - panY; }
+  });
+  window.addEventListener('mousemove', e => {
+    if (isPanning) { panX = e.clientX - startX; panY = e.clientY - startY; updateTransform(); }
+  });
+  window.addEventListener('mouseup', e => { if (e.button === 1) isPanning = false; });
+
+  // Double-click/tap reset
+  box.addEventListener('dblclick', () => { scale = 1; panX = 0; panY = 0; updateTransform(); });
+
+  // Touch pinch zoom + hold-drag pan
+  let lastPinchDist = 0;
+  let touchTimer = null;
+  let touchPanning = false;
+
+  box.addEventListener('touchstart', e => {
+    if (e.touches.length === 2) {
+      lastPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    }
+    if (e.touches.length === 1 && scale > 1) {
+      touchTimer = setTimeout(() => { touchPanning = true; startX = e.touches[0].clientX - panX; startY = e.touches[0].clientY - panY; }, 300);
+    }
+  }, { passive: true });
+
+  box.addEventListener('touchmove', e => {
+    if (e.touches.length === 2) {
+      const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+      if (lastPinchDist > 0) {
+        scale = Math.max(1, Math.min(5, scale * (dist / lastPinchDist)));
+        if (scale === 1) { panX = 0; panY = 0; }
+        updateTransform();
+      }
+      lastPinchDist = dist;
+    }
+    if (touchPanning && e.touches.length === 1) {
+      panX = e.touches[0].clientX - startX;
+      panY = e.touches[0].clientY - startY;
+      updateTransform();
+    }
+    if (!touchPanning && touchTimer) { clearTimeout(touchTimer); touchTimer = null; }
+  }, { passive: true });
+
+  box.addEventListener('touchend', () => {
+    lastPinchDist = 0;
+    if (touchTimer) { clearTimeout(touchTimer); touchTimer = null; }
+    touchPanning = false;
+  });
+}
+
+// ── Check if models are already cached ───────────────────────────
+import { checkCache } from './js/models.js';
+
+(async () => {
+  try {
+    const { cached, missing } = await checkCache();
+    if (missing.length === 0) {
+      loadSize.textContent = 'Models cached — ready to start!';
+      loadBtn.textContent = 'Start';
+    }
+  } catch (e) { /* ignore */ }
+})();
+
+</script>
+</body>
+</html>

@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>NewFace</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #08080c; --bg2: #0c0c12; --bg3: #101018;
+  --surface: rgba(16,16,24,0.8); --surface2: rgba(24,24,36,0.7);
+  --gold: #e8af48; --gold-l: #feeaa3; --gold-d: #c49746; --gold-dk: #533517;
+  --glow: rgba(232,175,72,0.15); --glow-s: rgba(232,175,72,0.3);
+  --text: #f0ece4; --text2: #a8a4a0; --muted: #6b6865;
+  --border: rgba(232,175,72,0.12); --border2: rgba(232,175,72,0.25);
+  --green: #4ade80; --red: #f87171;
+  --r: 12px; --rs: 8px;
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{height:100%;overflow:hidden}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);height:100%;overflow:hidden;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column}
+
+/* ═══ HEADER — ultra slim ═══ */
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:0 12px;height:36px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0;z-index:50}
+.logo{display:flex;align-items:center;gap:8px}
+.logo-i{width:22px;height:22px;border-radius:5px;background:linear-gradient(135deg,var(--gold),var(--gold-dk));display:flex;align-items:center;justify-content:center}
+.logo-i svg{width:11px;height:11px}
+.logo-t{font-size:14px;font-weight:600;letter-spacing:-.4px}
+.logo-t span{color:var(--gold)}
+.st{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text2);font-family:'JetBrains Mono',monospace}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--muted);transition:background .3s}
+.dot.ok{background:var(--green);box-shadow:0 0 6px rgba(74,222,128,.5)}
+.dot.ld{background:var(--gold);animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* ═══ NAV TABS — slim horizontal ═══ */
+.nav{display:flex;gap:2px;padding:4px 8px;background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto}
+.nav-t{padding:5px 12px;border-radius:16px;border:1px solid transparent;background:none;color:var(--muted);font-size:11px;font-weight:500;font-family:inherit;cursor:pointer;white-space:nowrap;transition:all .2s;-webkit-tap-highlight-color:transparent}
+.nav-t.on{color:var(--gold-l);background:var(--glow);border-color:var(--border2)}
+
+/* ═══ MAIN CONTENT — fills remaining space ═══ */
+.main{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch}
+.view{display:none;height:100%}.view.on{display:flex;flex-direction:column}
+
+/* ═══ LIVE VIEW — camera-app layout ═══ */
+.live-wrap{display:flex;flex-direction:column;height:100%}
+.cam-box{position:relative;flex:1;min-height:0;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.cam-box img{width:100%;height:100%;object-fit:contain;transform-origin:center center;transition:transform .1s ease-out;touch-action:none}
+.cam-ph{display:flex;flex-direction:column;align-items:center;gap:8px;color:var(--muted);font-size:12px}
+.cam-ph svg{width:36px;height:36px;opacity:.3}
+/* FPS overlay */
+.cam-overlay{position:absolute;top:8px;left:8px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text2);background:rgba(0,0,0,.5);padding:2px 6px;border-radius:4px;pointer-events:none}
+
+/* Camera action bar */
+.cam-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg2);border-top:1px solid var(--border);flex-shrink:0}
+.cam-bar .b{flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:9px 0;border-radius:var(--rs);border:1px solid var(--border2);background:var(--surface2);color:var(--text);font-size:12px;font-weight:500;font-family:inherit;cursor:pointer;transition:all .15s;-webkit-tap-highlight-color:transparent}
+.cam-bar .b:active{transform:scale(.97)}
+.cam-bar .b.pri{background:linear-gradient(135deg,var(--gold-dk),var(--gold));border-color:var(--gold);color:#0a0a0f;font-weight:600}
+.cam-bar .b.pri:disabled{opacity:.4;cursor:not-allowed}
+.cam-bar .b.stop{border-color:var(--red);color:var(--red)}
+.cam-bar .b svg{width:16px;height:16px}
+
+/* ═══ CONTROLS PANEL (below video) ═══ */
+.ctrl{flex-shrink:0;background:var(--bg2);border-top:1px solid var(--border);max-height:45vh;overflow-y:auto}
+.ctrl-section{padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.03)}
+.ctrl-section:last-child{border-bottom:none}
+.ctrl-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:6px}
+
+/* Region pills */
+.pills{display:flex;flex-wrap:wrap;gap:5px}
+.pill{padding:6px 12px;border-radius:16px;border:1px solid var(--border);background:var(--surface);color:var(--text2);font-size:11px;font-weight:500;cursor:pointer;transition:all .2s;-webkit-tap-highlight-color:transparent}
+.pill.on{background:var(--glow);color:var(--gold-l);border-color:var(--gold);box-shadow:0 0 8px var(--glow)}
+
+/* Blend slider */
+.sl-row{display:flex;align-items:center;gap:10px}
+.sl-row input[type="range"]{flex:1;-webkit-appearance:none;height:4px;border-radius:2px;background:var(--surface2);outline:none}
+.sl-row input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:var(--gold);border:2px solid var(--bg);box-shadow:0 0 6px var(--glow-s);cursor:grab}
+.sl-val{font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--gold);min-width:32px;text-align:right}
+
+/* Category tabs for references */
+.cat-tabs{display:flex;gap:3px;overflow-x:auto;padding-bottom:6px;-webkit-overflow-scrolling:touch}
+.cat-tabs::-webkit-scrollbar{display:none}
+.cat-tab{padding:4px 10px;border-radius:12px;border:1px solid var(--border);background:none;color:var(--muted);font-size:10px;font-weight:600;font-family:inherit;cursor:pointer;white-space:nowrap;transition:all .15s;-webkit-tap-highlight-color:transparent;text-transform:uppercase;letter-spacing:.5px}
+.cat-tab.on{color:var(--gold-l);background:var(--glow);border-color:var(--gold)}
+
+/* Reference horizontal scroll */
+.ref-scroll{display:flex;gap:6px;overflow-x:auto;padding:4px 0;-webkit-overflow-scrolling:touch}
+.ref-scroll::-webkit-scrollbar{display:none}
+.ref-c{width:60px;height:60px;border-radius:var(--rs);overflow:hidden;cursor:pointer;border:2px solid transparent;transition:all .15s;flex-shrink:0}
+.ref-c img{width:100%;height:100%;object-fit:cover}
+.ref-c:hover{border-color:var(--gold-d)}
+.ref-c.sel{border-color:var(--gold);box-shadow:0 0 10px var(--glow-s)}
+.ref-none{font-size:10px;color:var(--muted);padding:10px 0}
+
+/* ═══ PHOTO VIEW ═══ */
+.photo-view{padding:12px;overflow-y:auto}
+.photo-view .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px;margin-bottom:10px}
+.photo-view .card-t{font-size:12px;font-weight:600;margin-bottom:8px}
+.dropzone{border:2px dashed var(--border2);border-radius:var(--r);padding:24px;text-align:center;cursor:pointer;transition:all .3s;background:var(--surface)}
+.dropzone:hover,.dropzone.over{border-color:var(--gold);background:var(--glow)}
+.dropzone svg{width:24px;height:24px;color:var(--gold-d);margin-bottom:4px}
+.dropzone p{font-size:11px;color:var(--text2)}
+.photo-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.photo-frame{position:relative;aspect-ratio:3/4;border-radius:var(--rs);overflow:hidden;background:var(--surface);border:1px solid var(--border)}
+.photo-frame img{width:100%;height:100%;object-fit:cover}
+.photo-tag{position:absolute;top:6px;left:6px;font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:var(--gold);background:rgba(8,8,12,.85);padding:2px 7px;border-radius:10px;border:1px solid var(--border2)}
+.photo-ph{display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:11px;text-align:center;padding:12px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:9px 14px;border:1px solid var(--border2);border-radius:var(--rs);background:var(--surface2);color:var(--text);font-size:12px;font-family:inherit;font-weight:500;cursor:pointer;transition:all .15s}
+.btn:active{transform:scale(.97)}
+.btn-p{background:linear-gradient(135deg,var(--gold-dk),var(--gold));border-color:var(--gold);color:#0a0a0f;font-weight:600}
+.btn-p:disabled{opacity:.4;cursor:not-allowed}
+
+/* ═══ SETTINGS VIEW ═══ */
+.settings-view{padding:12px;overflow-y:auto}
+.settings-view .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px;margin-bottom:10px}
+.settings-view .card-t{font-size:12px;font-weight:600;margin-bottom:8px}
+.tog-row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.03)}
+.tog-row:last-child{border-bottom:none}
+.tog-row span{font-size:11px;color:var(--text2)}
+.tog-row .sub{font-size:9px;color:var(--muted)}
+.tog{position:relative;width:36px;height:20px;cursor:pointer;flex-shrink:0}
+.tog input{opacity:0;width:0;height:0}
+.tog .s{position:absolute;inset:0;background:var(--surface2);border-radius:10px;transition:.3s}
+.tog .s::before{content:'';position:absolute;height:14px;width:14px;left:3px;bottom:3px;background:var(--muted);border-radius:50%;transition:.3s}
+.tog input:checked+.s{background:var(--gold-dk)}
+.tog input:checked+.s::before{transform:translateX(16px);background:var(--gold)}
+
+/* Upload modal */
+.modal-bg{position:fixed;inset:0;background:rgba(8,8,12,.88);backdrop-filter:blur(4px);z-index:100;display:flex;align-items:flex-end;justify-content:center}
+.modal-bg.hid{display:none}
+.modal{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r) var(--r) 0 0;padding:20px;width:100%;max-width:420px;max-height:80vh;overflow-y:auto}
+.modal h2{font-size:15px;font-weight:600;margin-bottom:12px;color:var(--gold-l)}
+.modal label{display:block;font-size:11px;color:var(--text2);margin:8px 0 3px}
+.modal input[type="text"],.modal select{width:100%;padding:9px 10px;border-radius:var(--rs);border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;font-family:inherit;outline:none}
+.modal-btns{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+
+/* Toast */
+.toasts{position:fixed;bottom:8px;left:8px;right:8px;z-index:10000;display:flex;flex-direction:column;gap:4px;pointer-events:none}
+.toast{padding:8px 12px;border-radius:var(--rs);font-size:11px;color:var(--text);background:var(--surface);backdrop-filter:blur(16px);border:1px solid var(--border);animation:ti .2s;box-shadow:0 4px 12px rgba(0,0,0,.5);pointer-events:auto}
+.toast.ok{border-color:var(--green);color:var(--green)}
+.toast.err{border-color:var(--red);color:var(--red)}
+@keyframes ti{from{transform:translateY(16px);opacity:0}to{transform:translateY(0);opacity:1}}
+
+/* Snap flash */
+.flash{position:absolute;inset:0;background:white;opacity:0;pointer-events:none;z-index:20;animation:fl .3s}
+@keyframes fl{0%{opacity:.5}100%{opacity:0}}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--surface2);border-radius:2px}
+
+/* ═══ DESKTOP 768px+ ═══ */
+@media(min-width:768px){
+  .hdr{height:44px;padding:0 20px}
+  .nav{justify-content:center;gap:4px;padding:6px 16px}
+  .nav-t{padding:6px 16px;font-size:12px}
+  .live-wrap{flex-direction:row}
+  .cam-box{flex:1}
+  .ctrl{max-height:none;width:320px;border-top:none;border-left:1px solid var(--border);overflow-y:auto}
+  .cam-bar{position:absolute;bottom:0;left:0;right:0;background:rgba(8,8,12,.7);backdrop-filter:blur(8px);border-top:1px solid rgba(255,255,255,.05);z-index:10}
+  .ref-c{width:72px;height:72px}
+  .photo-view,.settings-view{max-width:700px;margin:0 auto;padding:20px}
+  .modal{border-radius:var(--r);align-self:center}
+  .modal-bg{align-items:center;padding:20px}
+  .toasts{bottom:16px;left:auto;right:16px;width:300px}
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="hdr">
+  <div class="logo">
+    <div class="logo-i"><svg viewBox="0 0 24 24" fill="none" stroke="#0a0a0f" stroke-width="2.5" stroke-linecap="round"><path d="M12 2a10 10 0 0 0-7.07 17.07"/><circle cx="12" cy="10" r="3"/><path d="M6 20.09A10 10 0 0 0 22 12"/></svg></div>
+    <div class="logo-t">New<span>Face</span></div>
+  </div>
+  <div class="st"><div class="dot" id="dot"></div><span id="stTxt">Loading...</span></div>
+</header>
+
+<!-- NAV -->
+<nav class="nav">
+  <button class="nav-t on" data-v="live" onclick="go('live')">Live</button>
+  <button class="nav-t" data-v="photo" onclick="go('photo')">Photo</button>
+  <button class="nav-t" data-v="settings" onclick="go('settings')">Settings</button>
+</nav>
+
+<!-- ═══ LIVE VIEW ═══ -->
+<div class="main">
+<section class="view on" id="v-live">
+  <div class="live-wrap">
+    <!-- Camera feed — fills available space -->
+    <div class="cam-box" id="camBox">
+      <div class="cam-ph" id="camPh">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+        <span>Tap Start to begin</span>
+      </div>
+      <img id="camImg" style="display:none" alt="">
+      <div class="cam-overlay" id="camOverlay" style="display:none"></div>
+    </div>
+
+    <!-- Action bar on top of or below video -->
+    <div class="cam-bar">
+      <button class="b pri" id="startBtn" onclick="startCam()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Start
+      </button>
+      <button class="b stop" id="stopBtn" onclick="stopCam()" style="display:none">Stop</button>
+      <button class="b" id="snapBtn" onclick="snap()" style="display:none">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4" fill="currentColor"/></svg>
+      </button>
+      <button class="b" id="expBtn" onclick="exportSnap()" style="display:none">Export</button>
+    </div>
+
+    <!-- Compact controls -->
+    <div class="ctrl">
+      <!-- Region -->
+      <div class="ctrl-section">
+        <div class="ctrl-label">Region</div>
+        <div class="pills" id="pills">
+          <div class="pill" data-r="full" onclick="setR('full')">Full</div>
+          <div class="pill on" data-r="nose" onclick="setR('nose')">Nose</div>
+          <div class="pill" data-r="chin" onclick="setR('chin')">Chin</div>
+          <div class="pill" data-r="brow" onclick="setR('brow')">Brow</div>
+          <div class="pill" data-r="eyes" onclick="setR('eyes')">Eyes</div>
+          <div class="pill" data-r="lips" onclick="setR('lips')">Lips</div>
+        </div>
+      </div>
+
+      <!-- Blend -->
+      <div class="ctrl-section">
+        <div class="sl-row">
+          <span style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.8px;min-width:36px">Blend</span>
+          <input type="range" id="opSlider" min="0" max="100" value="70" oninput="updOp()">
+          <span class="sl-val" id="opVal">70%</span>
+        </div>
+      </div>
+
+      <!-- Reference faces with category tabs -->
+      <div class="ctrl-section">
+        <div class="ctrl-label">Reference Face</div>
+        <div class="cat-tabs" id="catTabs"></div>
+        <div class="ref-scroll" id="refScroll"></div>
+        <div style="margin-top:6px;display:flex;gap:6px">
+          <button class="btn" style="font-size:10px;padding:5px 10px;flex:1" onclick="clearRef()">Clear</button>
+          <button class="btn" style="font-size:10px;padding:5px 10px" onclick="showUpload()">+ Add</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ PHOTO VIEW ═══ -->
+<section class="view" id="v-photo">
+  <div class="photo-view">
+    <div id="photoUp">
+      <div class="card">
+        <div class="card-t">Patient Photo</div>
+        <div class="dropzone" id="dz">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <p>Drop photo or tap to browse</p>
+          <input type="file" id="fileIn" accept="image/*" style="display:none">
+        </div>
+      </div>
+    </div>
+    <div id="photoWork" style="display:none">
+      <div class="photo-grid">
+        <div class="photo-frame"><span class="photo-tag">Before</span><img id="beforeImg"></div>
+        <div class="photo-frame"><span class="photo-tag">After</span><div class="photo-ph" id="afterPh">Select ref & generate</div><img id="afterImg" style="display:none"></div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-p" id="genBtn" disabled onclick="genPreview()" style="flex:1">Generate</button>
+        <button class="btn" id="photoExpBtn" disabled onclick="exportPhoto()">Export</button>
+        <button class="btn" onclick="resetPhoto()">New</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ SETTINGS VIEW ═══ -->
+<section class="view" id="v-settings">
+  <div class="settings-view">
+    <div class="card">
+      <div class="card-t">Quality Enhancers</div>
+      <p style="font-size:10px;color:var(--muted);margin-bottom:8px">Applied on snapshot/export only.</p>
+      <div class="tog-row"><span>GFPGAN <span class="sub">(325 MB)</span></span><label class="tog"><input type="checkbox" id="tGfpgan" onchange="updSet()"><span class="s"></span></label></div>
+      <div class="tog-row"><span>GPEN-512 <span class="sub">(272 MB)</span></span><label class="tog"><input type="checkbox" id="tGpen512" onchange="updSet()"><span class="s"></span></label></div>
+      <div class="tog-row"><span>GPEN-256 <span class="sub">(73 MB)</span></span><label class="tog"><input type="checkbox" id="tGpen256" onchange="updSet()"><span class="s"></span></label></div>
+    </div>
+    <div class="card">
+      <div class="tog-row" style="border:none"><span>Mirror Camera</span><label class="tog"><input type="checkbox" id="tMirror" checked onchange="updSet()"><span class="s"></span></label></div>
+    </div>
+    <div class="card">
+      <div class="sl-row">
+        <span style="font-size:11px;color:var(--text2);min-width:64px">Sharpness</span>
+        <input type="range" id="sharpSlider" min="0" max="100" value="50" oninput="updSet()">
+        <span class="sl-val" id="sharpVal">50%</span>
+      </div>
+    </div>
+    <p style="text-align:center;font-size:9px;color:var(--muted);padding:12px">Simulation only. Not a guarantee of surgical results.</p>
+  </div>
+</section>
+</div>
+
+<!-- UPLOAD MODAL -->
+<div class="modal-bg hid" id="upModal">
+  <div class="modal">
+    <h2>Add Reference</h2>
+    <label>Photo</label>
+    <div class="dropzone" id="refDz" style="padding:12px">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:20px;height:20px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      <p style="font-size:11px">Tap or drop</p>
+      <input type="file" id="refFileIn" accept="image/*" style="display:none">
+    </div>
+    <div id="refThumb" style="margin-top:4px;display:none"><img id="refThumbImg" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--border2)"></div>
+    <label>Name</label>
+    <input type="text" id="refName" placeholder="e.g. Refined Nose A">
+    <label>Category</label>
+    <select id="refCat"><option value="nose">Nose</option><option value="chin">Chin / Jaw</option><option value="brow">Brow</option><option value="lips">Lips</option><option value="eyes">Eyes</option><option value="general">General</option></select>
+    <div class="modal-btns">
+      <button class="btn" onclick="hideUpload()">Cancel</button>
+      <button class="btn btn-p" onclick="uploadRef()">Upload</button>
+    </div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+/* ─── State ─── */
+const S = {
+  ready:false, camOn:false, ref:null, region:'nose', opacity:.7,
+  patientId:null, patientFile:null, lastResult:null,
+  snapResult:null, snapRaw:null, cat:'nose',
+};
+const CATS = ['nose','lips','eyes','brow','chin','general'];
+const CAT_LBL = {nose:'Nose',lips:'Lips',eyes:'Eyes',brow:'Brow',chin:'Chin',general:'All'};
+let allRefs = [];
+
+/* ─── Nav ─── */
+function go(v) {
+  document.querySelectorAll('.view').forEach(x => x.classList.remove('on'));
+  document.querySelectorAll('.nav-t').forEach(x => x.classList.remove('on'));
+  document.getElementById('v-'+v).classList.add('on');
+  document.querySelector(`.nav-t[data-v="${v}"]`).classList.add('on');
+}
+
+/* ─── Toast ─── */
+function toast(m, t='') {
+  const el = document.createElement('div');
+  el.className = 'toast ' + t; el.textContent = m;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => { el.style.animation = 'none'; el.style.opacity = '0'; el.style.transform = 'translateY(10px)'; el.style.transition = '.2s'; setTimeout(() => el.remove(), 200); }, 2200);
+}
+
+/* ─── Status poll ─── */
+async function poll() {
+  try {
+    const r = await fetch('/api/status'); const d = await r.json();
+    const dot = document.getElementById('dot');
+    const txt = document.getElementById('stTxt');
+    if (d.ready) { dot.className='dot ok'; txt.textContent='Ready'; S.ready=true; }
+    else if (d.loading) { dot.className='dot ld'; txt.textContent='Loading...'; }
+    else if (d.error) { dot.className='dot'; txt.textContent='Error'; }
+    // Update floating overlay
+    const ov = document.getElementById('camOverlay');
+    if (d.camera_active && S.camOn) {
+      ov.style.display = '';
+      ov.textContent = d.camera_fps + ' FPS' + (S.ref ? '  ' + S.region.toUpperCase() : '');
+    } else { ov.style.display = 'none'; }
+  } catch(e){}
+  // Keep polling forever — doubles as heartbeat so server auto-shuts down when tab closes
+  setTimeout(poll, 2000);
+}
+
+/* ─── References ─── */
+async function loadRefs() {
+  const r = await fetch('/api/references'); allRefs = await r.json();
+  buildCatTabs();
+  showCat(S.cat);
+}
+
+function buildCatTabs() {
+  const el = document.getElementById('catTabs');
+  el.innerHTML = '';
+  CATS.forEach(c => {
+    const ct = allRefs.filter(r => r.filename.startsWith(c + '_')).length;
+    if (c !== 'general' && ct === 0) return;
+    const b = document.createElement('button');
+    b.className = 'cat-tab' + (c === S.cat ? ' on' : '');
+    b.textContent = CAT_LBL[c] + (ct ? ' ' + ct : '');
+    b.onclick = () => showCat(c);
+    el.appendChild(b);
+  });
+}
+
+function showCat(cat) {
+  S.cat = cat;
+  document.querySelectorAll('.cat-tab').forEach(t => t.classList.toggle('on', t.textContent.toLowerCase().startsWith(cat)));
+  const el = document.getElementById('refScroll');
+  el.innerHTML = '';
+  const items = cat === 'general'
+    ? allRefs
+    : allRefs.filter(r => r.filename.startsWith(cat + '_'));
+  if (!items.length) { el.innerHTML = '<div class="ref-none">No references</div>'; return; }
+  items.forEach(ref => {
+    const d = document.createElement('div');
+    d.className = 'ref-c' + (S.ref === ref.filename ? ' sel' : '');
+    d.innerHTML = `<img src="${ref.url}" loading="lazy">`;
+    d.onclick = () => selRef(ref.filename, ref.name);
+    el.appendChild(d);
+  });
+}
+
+async function selRef(fn, name) {
+  S.ref = fn;
+  document.querySelectorAll('.ref-c').forEach(t => t.classList.toggle('sel', t.querySelector('img')?.src.includes(fn)));
+  toast('Reference: ' + name, 'ok');
+  // Always send to backend, regardless of camera state — so it's ready when camera starts
+  await fetch('/api/camera/set-reference', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ reference_filename: fn })
+  });
+  updBtns();
+}
+
+async function clearRef() {
+  S.ref = null;
+  document.querySelectorAll('.ref-c').forEach(t => t.classList.remove('sel'));
+  await fetch('/api/camera/set-reference', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ reference_filename: null })
+  });
+  toast('Cleared');
+  updBtns();
+}
+
+/* ─── Region ─── */
+async function setR(r) {
+  S.region = r;
+  document.querySelectorAll('.pill').forEach(p => p.classList.toggle('on', p.dataset.r === r));
+  await fetch('/api/camera/settings', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ region: r })
+  });
+}
+
+/* ─── Opacity ─── */
+let _opT;
+function updOp() {
+  const v = document.getElementById('opSlider').value;
+  document.getElementById('opVal').textContent = v + '%';
+  S.opacity = v / 100;
+  clearTimeout(_opT);
+  _opT = setTimeout(() => {
+    fetch('/api/camera/settings', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ opacity: S.opacity })
+    });
+  }, 150);
+}
+
+/* ─── Settings ─── */
+let _stT;
+function updSet() {
+  document.getElementById('sharpVal').textContent = document.getElementById('sharpSlider').value + '%';
+  clearTimeout(_stT);
+  _stT = setTimeout(() => {
+    fetch('/api/camera/settings', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        mirror: document.getElementById('tMirror').checked,
+        gfpgan: document.getElementById('tGfpgan').checked,
+        gpen512: document.getElementById('tGpen512').checked,
+        gpen256: document.getElementById('tGpen256').checked,
+        sharpness: parseInt(document.getElementById('sharpSlider').value),
+      })
+    });
+  }, 200);
+}
+
+/* ─── Camera ─── */
+async function startCam() {
+  if (!S.ready) { toast('Engine loading...', 'err'); return; }
+  await fetch('/api/camera/start', { method:'POST' });
+  // Always re-send current state to backend
+  if (S.ref) {
+    await fetch('/api/camera/set-reference', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ reference_filename: S.ref })
+    });
+  }
+  await fetch('/api/camera/settings', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      opacity: S.opacity, region: S.region,
+      mirror: document.getElementById('tMirror').checked,
+      gfpgan: document.getElementById('tGfpgan').checked,
+      gpen512: document.getElementById('tGpen512').checked,
+      gpen256: document.getElementById('tGpen256').checked,
+      sharpness: parseInt(document.getElementById('sharpSlider').value),
+    })
+  });
+  const img = document.getElementById('camImg');
+  img.src = '/api/camera/stream?' + Date.now(); // cache-bust
+  img.style.display = 'block';
+  document.getElementById('camPh').style.display = 'none';
+  S.camOn = true;
+  document.getElementById('startBtn').style.display = 'none';
+  document.getElementById('stopBtn').style.display = '';
+  document.getElementById('snapBtn').style.display = '';
+  toast('Camera started', 'ok');
+}
+
+async function stopCam() {
+  await fetch('/api/camera/stop', { method:'POST' });
+  const img = document.getElementById('camImg');
+  img.style.display = 'none'; img.src = '';
+  document.getElementById('camPh').style.display = '';
+  S.camOn = false;
+  document.getElementById('startBtn').style.display = '';
+  document.getElementById('stopBtn').style.display = 'none';
+  document.getElementById('snapBtn').style.display = 'none';
+  document.getElementById('expBtn').style.display = 'none';
+  toast('Stopped');
+}
+
+async function snap() {
+  if (!S.camOn) return;
+  const box = document.getElementById('camBox');
+  const fl = document.createElement('div'); fl.className = 'flash'; box.appendChild(fl);
+  setTimeout(() => fl.remove(), 300);
+  try {
+    const r = await fetch('/api/camera/snapshot', { method:'POST' });
+    const d = await r.json();
+    if (d.error) { toast(d.error, 'err'); return; }
+    S.snapResult = d.result_filename; S.snapRaw = d.raw_filename;
+    document.getElementById('expBtn').style.display = '';
+    toast('Snapshot saved', 'ok');
+  } catch(e) { toast('Failed', 'err'); }
+}
+
+async function exportSnap() {
+  if (!S.snapResult || !S.snapRaw) return;
+  try {
+    const r = await fetch('/api/export', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ before_filename: S.snapRaw, after_filename: S.snapResult })
+    });
+    const blob = await r.blob(); const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'sculptface_comparison.jpg'; a.click();
+    URL.revokeObjectURL(url); toast('Exported', 'ok');
+  } catch(e) { toast('Export failed', 'err'); }
+}
+
+/* ─── Photo ─── */
+const dz = document.getElementById('dz');
+const fi = document.getElementById('fileIn');
+dz.addEventListener('click', () => fi.click());
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('over'); if(e.dataTransfer.files[0]) uploadPatient(e.dataTransfer.files[0]); });
+fi.addEventListener('change', () => { if(fi.files[0]) uploadPatient(fi.files[0]); });
+
+async function uploadPatient(file) {
+  const fd = new FormData(); fd.append('photo', file);
+  const r = await fetch('/api/upload', { method:'POST', body:fd });
+  const d = await r.json();
+  if (d.error) { toast(d.error, 'err'); return; }
+  S.patientId = d.patient_id; S.patientFile = d.filename;
+  document.getElementById('photoUp').style.display = 'none';
+  document.getElementById('photoWork').style.display = '';
+  document.getElementById('beforeImg').src = '/api/upload-image/' + d.filename;
+  toast(d.message, 'ok'); updBtns();
+}
+
+function resetPhoto() {
+  S.patientId = null; S.patientFile = null; S.lastResult = null;
+  document.getElementById('photoUp').style.display = '';
+  document.getElementById('photoWork').style.display = 'none';
+  document.getElementById('afterImg').style.display = 'none';
+  document.getElementById('afterPh').style.display = '';
+  fi.value = ''; updBtns();
+}
+
+async function genPreview() {
+  if (!S.patientFile || !S.ref) return;
+  document.getElementById('genBtn').disabled = true;
+  try {
+    const r = await fetch('/api/preview', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        patient_id: S.patientId, patient_filename: S.patientFile,
+        reference_filename: S.ref, opacity: S.opacity, region: S.region,
+        gfpgan: document.getElementById('tGfpgan').checked,
+        gpen512: document.getElementById('tGpen512').checked,
+        gpen256: document.getElementById('tGpen256').checked,
+        sharpness: parseInt(document.getElementById('sharpSlider').value),
+      })
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, 'err'); return; }
+    const img = document.getElementById('afterImg');
+    img.src = 'data:image/jpeg;base64,' + d.image_b64; img.style.display = '';
+    document.getElementById('afterPh').style.display = 'none';
+    S.lastResult = d.result_filename;
+    document.getElementById('photoExpBtn').disabled = false;
+    toast('Preview: ' + S.region + ' @ ' + Math.round(d.opacity*100) + '%', 'ok');
+  } catch(e) { toast('Failed', 'err'); }
+  finally { document.getElementById('genBtn').disabled = false; }
+}
+
+async function exportPhoto() {
+  if (!S.patientFile || !S.lastResult) return;
+  const r = await fetch('/api/export', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ patient_filename: S.patientFile, result_filename: S.lastResult })
+  });
+  const blob = await r.blob(); const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'comparison_' + S.patientId + '.jpg'; a.click();
+  URL.revokeObjectURL(url); toast('Exported', 'ok');
+}
+
+/* ─── Upload modal ─── */
+let refFile = null;
+function showUpload() { refFile = null; document.getElementById('upModal').classList.remove('hid'); document.getElementById('refThumb').style.display = 'none'; document.getElementById('refName').value = ''; }
+function hideUpload() { document.getElementById('upModal').classList.add('hid'); }
+const rd = document.getElementById('refDz');
+const rfi = document.getElementById('refFileIn');
+rd.addEventListener('click', () => rfi.click());
+rd.addEventListener('dragover', e => { e.preventDefault(); rd.classList.add('over'); });
+rd.addEventListener('dragleave', () => rd.classList.remove('over'));
+rd.addEventListener('drop', e => { e.preventDefault(); rd.classList.remove('over'); if(e.dataTransfer.files[0]) handleRefFile(e.dataTransfer.files[0]); });
+rfi.addEventListener('change', () => { if(rfi.files[0]) handleRefFile(rfi.files[0]); });
+
+function handleRefFile(f) {
+  refFile = f;
+  const reader = new FileReader();
+  reader.onload = e => { document.getElementById('refThumbImg').src = e.target.result; document.getElementById('refThumb').style.display = ''; };
+  reader.readAsDataURL(f);
+}
+
+async function uploadRef() {
+  if (!refFile) { toast('Pick a photo', 'err'); return; }
+  const fd = new FormData();
+  fd.append('photo', refFile);
+  fd.append('name', document.getElementById('refName').value);
+  fd.append('category', document.getElementById('refCat').value);
+  const r = await fetch('/api/upload-reference', { method:'POST', body:fd });
+  const d = await r.json();
+  if (d.error) { toast(d.error, 'err'); return; }
+  toast('Added', 'ok'); hideUpload(); loadRefs();
+}
+
+/* ─── Button state ─── */
+function updBtns() {
+  document.getElementById('genBtn').disabled = !(S.ready && S.patientFile && S.ref);
+}
+
+/* ─── Zoom (scroll wheel + pinch) ─── */
+const zoomState = { scale: 1, tx: 0, ty: 0, min: 1, max: 5 };
+let pinchDist0 = 0, pinchScale0 = 1;
+
+function applyZoom() {
+  const img = document.getElementById('camImg');
+  if (!img) return;
+  // Clamp translation so image doesn't drift off-screen
+  const maxT = (zoomState.scale - 1) * 50; // percent
+  zoomState.tx = Math.max(-maxT, Math.min(maxT, zoomState.tx));
+  zoomState.ty = Math.max(-maxT, Math.min(maxT, zoomState.ty));
+  img.style.transform = `scale(${zoomState.scale}) translate(${zoomState.tx}%, ${zoomState.ty}%)`;
+}
+
+// Desktop: scroll wheel to zoom
+const camBox = document.getElementById('camBox');
+camBox.addEventListener('wheel', e => {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? -0.15 : 0.15;
+  zoomState.scale = Math.max(zoomState.min, Math.min(zoomState.max, zoomState.scale + delta));
+  if (zoomState.scale <= 1) { zoomState.tx = 0; zoomState.ty = 0; }
+  applyZoom();
+}, { passive: false });
+
+// Desktop: middle-mouse drag to pan
+let midDrag = false, midX0 = 0, midY0 = 0, txSnap = 0, tySnap = 0;
+camBox.addEventListener('mousedown', e => {
+  if (e.button === 1 && zoomState.scale > 1) {
+    e.preventDefault();
+    midDrag = true; midX0 = e.clientX; midY0 = e.clientY;
+    txSnap = zoomState.tx; tySnap = zoomState.ty;
+    camBox.style.cursor = 'grabbing';
+  }
+});
+window.addEventListener('mousemove', e => {
+  if (!midDrag) return;
+  const box = camBox.getBoundingClientRect();
+  const dx = (e.clientX - midX0) / box.width * 100;
+  const dy = (e.clientY - midY0) / box.height * 100;
+  zoomState.tx = txSnap + dx; zoomState.ty = tySnap + dy;
+  applyZoom();
+});
+window.addEventListener('mouseup', e => {
+  if (e.button === 1 && midDrag) { midDrag = false; camBox.style.cursor = ''; }
+});
+// Prevent middle-click scroll icon
+camBox.addEventListener('auxclick', e => { if (e.button === 1) e.preventDefault(); });
+
+// Mobile: pinch to zoom
+let touchHold = false, holdTimer = 0, touchPanX0 = 0, touchPanY0 = 0, txSnap2 = 0, tySnap2 = 0;
+camBox.addEventListener('touchstart', e => {
+  if (e.touches.length === 2) {
+    // Pinch start
+    touchHold = false; clearTimeout(holdTimer);
+    pinchDist0 = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    pinchScale0 = zoomState.scale;
+  } else if (e.touches.length === 1 && zoomState.scale > 1) {
+    // Touch-hold to pan: start a 200ms timer
+    touchHold = false;
+    touchPanX0 = e.touches[0].clientX; touchPanY0 = e.touches[0].clientY;
+    txSnap2 = zoomState.tx; tySnap2 = zoomState.ty;
+    holdTimer = setTimeout(() => { touchHold = true; }, 200);
+  }
+}, { passive: true });
+
+camBox.addEventListener('touchmove', e => {
+  if (e.touches.length === 2) {
+    e.preventDefault();
+    const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    zoomState.scale = Math.max(zoomState.min, Math.min(zoomState.max, pinchScale0 * (dist / pinchDist0)));
+    if (zoomState.scale <= 1.05) { zoomState.scale = 1; zoomState.tx = 0; zoomState.ty = 0; }
+    applyZoom();
+  } else if (e.touches.length === 1 && zoomState.scale > 1) {
+    // If moved > 10px before hold timer, cancel hold and allow normal scroll
+    const moved = Math.hypot(e.touches[0].clientX - touchPanX0, e.touches[0].clientY - touchPanY0);
+    if (!touchHold && moved > 10) { clearTimeout(holdTimer); return; }
+    if (touchHold) {
+      e.preventDefault();
+      const box = camBox.getBoundingClientRect();
+      const dx = (e.touches[0].clientX - touchPanX0) / box.width * 100;
+      const dy = (e.touches[0].clientY - touchPanY0) / box.height * 100;
+      zoomState.tx = txSnap2 + dx; zoomState.ty = tySnap2 + dy;
+      applyZoom();
+    }
+  }
+}, { passive: false });
+
+camBox.addEventListener('touchend', () => { clearTimeout(holdTimer); touchHold = false; });
+
+// Double-tap to reset zoom
+let lastTap = 0;
+camBox.addEventListener('touchend', e => {
+  const now = Date.now();
+  if (now - lastTap < 300) {
+    zoomState.scale = 1; zoomState.tx = 0; zoomState.ty = 0;
+    applyZoom();
+  }
+  lastTap = now;
+});
+
+// Double-click to reset on desktop
+camBox.addEventListener('dblclick', () => {
+  zoomState.scale = 1; zoomState.tx = 0; zoomState.ty = 0;
+  applyZoom();
+});
+
+/* ─── Settings Persistence (localStorage) ─── */
+const SAVE_KEYS = ['region','opacity','cat'];
+const SAVE_TOGGLES = {tGfpgan:'gfpgan',tGpen512:'gpen512',tGpen256:'gpen256',tMirror:'mirror'};
+
+function savePrefs() {
+  const p = {
+    region: S.region,
+    opacity: S.opacity,
+    cat: S.cat,
+    sharpness: parseInt(document.getElementById('sharpSlider').value),
+  };
+  for (const [id, key] of Object.entries(SAVE_TOGGLES)) {
+    p[key] = document.getElementById(id).checked;
+  }
+  localStorage.setItem('newface_prefs', JSON.stringify(p));
+}
+
+function loadPrefs() {
+  try {
+    const p = JSON.parse(localStorage.getItem('newface_prefs'));
+    if (!p) return;
+    // Region
+    if (p.region && ['full','nose','chin','brow','eyes','lips'].includes(p.region)) {
+      S.region = p.region;
+      document.querySelectorAll('.pill').forEach(x => x.classList.toggle('on', x.dataset.r === p.region));
+    }
+    // Opacity
+    if (p.opacity !== undefined) {
+      S.opacity = p.opacity;
+      document.getElementById('opSlider').value = Math.round(p.opacity * 100);
+      document.getElementById('opVal').textContent = Math.round(p.opacity * 100) + '%';
+    }
+    // Sharpness
+    if (p.sharpness !== undefined) {
+      document.getElementById('sharpSlider').value = p.sharpness;
+      document.getElementById('sharpVal').textContent = p.sharpness + '%';
+    }
+    // Toggles
+    for (const [id, key] of Object.entries(SAVE_TOGGLES)) {
+      if (p[key] !== undefined) document.getElementById(id).checked = p[key];
+    }
+    // Category tab
+    if (p.cat) S.cat = p.cat;
+  } catch(e) {}
+}
+
+// Hook into settings changes to auto-save
+const _origUpdSet = updSet;
+updSet = function() { _origUpdSet(); savePrefs(); };
+const _origUpdOp = updOp;
+updOp = function() { _origUpdOp(); savePrefs(); };
+const _origSetR = setR;
+setR = async function(r) { await _origSetR(r); savePrefs(); };
+const _origShowCat = showCat;
+showCat = function(c) { _origShowCat(c); savePrefs(); };
+
+/* ─── Init ─── */
+loadPrefs();
+poll(); loadRefs();
+</script>
+</body>
+</html>

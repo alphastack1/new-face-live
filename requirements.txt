@@ -1,0 +1,8 @@
+flask>=3.0
+flask-cors>=6.0
+opencv-python>=4.10
+numpy>=1.26,<2.0
+onnxruntime-gpu>=1.18
+insightface>=0.7
+pillow>=10.0
+albumentations>=2.0
