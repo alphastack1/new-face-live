@@ -6,7 +6,7 @@
 import {
   estimateSimilarityTransform, invertAffine, affinePoint,
   warpAffine, warpAffineMask, nms, vecNormalize, matVecMul,
-} from './math.js?v=3';
+} from './math.js?v=4';
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -260,7 +260,8 @@ export async function runSwap(session, alignedRGBA, sourceLatent) {
   }
 
   const targetTensor = new ort.Tensor('float32', imgTensor, [1, 3, size, size]);
-  const sourceTensor = new ort.Tensor('float32', sourceLatent, [1, 512]);
+  // Clone sourceLatent — ORT proxy mode may transfer the underlying buffer
+  const sourceTensor = new ort.Tensor('float32', new Float32Array(sourceLatent), [1, 512]);
 
   // Use named feeds (safer than positional — input order may vary)
   const feeds = { 'target': targetTensor, 'source': sourceTensor };

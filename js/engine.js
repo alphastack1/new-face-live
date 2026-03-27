@@ -3,12 +3,12 @@
  * Manages model loading, camera, frame processing loop.
  */
 
-import { loadSession, loadSessionWasm, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=3';
+import { loadSession, loadSessionWasm, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=4';
 import {
   detectOneFace, alignFace, extractEmbedding, projectEmbedding,
   runSwap, pasteBack, parseFullFrame, createRegionMask,
   blendRegion, sharpen,
-} from './pipeline.js?v=3';
+} from './pipeline.js?v=4';
 
 export class Engine {
   constructor() {
@@ -167,13 +167,16 @@ export class Engine {
     // Yield helper — lets RAF callbacks fire so the video stays live
     const yieldToUI = () => new Promise(r => setTimeout(r, 0));
 
-    // 1. Detect face in frame (with WASM fallback if WebGPU fails at runtime)
+    // 1. Detect face in frame (with WASM fallback — cached)
     let face;
     try {
       face = await detectOneFace(this.detSession, frameData);
     } catch (e) {
       console.warn('[Frame] detect failed, falling back to WASM:', e?.message);
-      this.detSession = await loadSessionWasm('det_10g');
+      if (!this._detWasmSession) {
+        this._detWasmSession = await loadSessionWasm('det_10g');
+      }
+      this.detSession = this._detWasmSession;
       face = await detectOneFace(this.detSession, frameData);
     }
     if (!face) return null;
@@ -185,13 +188,17 @@ export class Engine {
       frameData.data, W, H, face.kps, 128
     );
 
-    // 3. Run face swap (with WASM fallback)
+    // 3. Run face swap (with WASM fallback — cached, not reloaded per-frame)
     let swappedFace;
     try {
       swappedFace = await runSwap(this.swapSession, aligned128, this.sourceLatent);
     } catch (e) {
       console.warn('[Frame] swap failed, falling back to WASM:', e?.message);
-      this.swapSession = await loadSessionWasm('inswapper');
+      if (!this._swapWasmSession) {
+        console.log('[Frame] Loading WASM fallback for inswapper (one-time)...');
+        this._swapWasmSession = await loadSessionWasm('inswapper');
+      }
+      this.swapSession = this._swapWasmSession;
       swappedFace = await runSwap(this.swapSession, aligned128, this.sourceLatent);
     }
     console.log(`[Frame] swap ${Math.round(performance.now() - t0)}ms`);
