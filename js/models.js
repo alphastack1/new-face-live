@@ -10,7 +10,7 @@ const STORE_NAME = 'blobs';
 const MODEL_REGISTRY = {
   det_10g:    { file: 'det_10g.onnx',              size: 16_923_827 },
   w600k_r50:  { file: 'w600k_r50.onnx',            size: 174_383_860 },
-  inswapper:  { file: 'inswapper_128_fp16.onnx',    size: 277_680_638 },
+  inswapper:  { file: 'inswapper_128.onnx',          size: 554_266_130 },
   bisenet:    { file: 'bisenet_resnet_34.onnx',     size: 93_632_546 },
   emap:       { file: 'emap.bin',                   size: 1_048_576 },
 };
