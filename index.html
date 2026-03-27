@@ -362,6 +362,7 @@ window.toggleCamera = async function() {
 
 function stopCamera() {
   camRunning = false;
+  lastResult = null;
   if (animFrame) cancelAnimationFrame(animFrame);
   if (camStream) {
     camStream.getTracks().forEach(t => t.stop());
@@ -376,51 +377,60 @@ function stopCamera() {
 // ── Frame Processing Loop ────────────────────────────────────────
 let processing = false;
 let frameErrors = 0;
+let lastResult = null; // Last processed ImageData overlay
+
+function drawVideoFrame() {
+  if (mirror) {
+    ctx.save();
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+    ctx.restore();
+  } else {
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  }
+}
 
 async function processLoop() {
   if (!camRunning) return;
 
-  if (!processing) {
+  // Always draw the live video so it never freezes
+  drawVideoFrame();
+
+  // Overlay last swap result if available
+  if (lastResult) {
+    ctx.putImageData(lastResult, 0, 0);
+  }
+
+  // Start inference if not already running and we have a reference
+  if (!processing && engine.sourceLatent) {
     processing = true;
-    try {
-      // Draw video to canvas
-      if (mirror) {
-        ctx.save();
-        ctx.scale(-1, 1);
-        ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
-        ctx.restore();
-      } else {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    // Capture frame data from current video draw
+    const frameData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    // Run inference async — don't block the render loop
+    engine.processFrame(frameData).then(result => {
+      if (result) {
+        lastResult = result;
       }
-
-      // Process if we have a reference
-      if (engine.sourceLatent) {
-        const frameData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const result = await engine.processFrame(frameData);
-        if (result) {
-          ctx.putImageData(result, 0, 0);
-        }
-      }
-
-      // Update overlay
-      overlay.textContent = engine.fps > 0
-        ? `${engine.fps} FPS | ${engine.region}`
-        : engine.region;
-
       frameErrors = 0;
-    } catch (err) {
+      processing = false;
+    }).catch(err => {
       frameErrors++;
       console.error('Frame error:', err);
+      processing = false;
       if (frameErrors > 10) {
         toast('Too many errors — stopping camera', 'err');
         stopCamera();
         return;
       }
-    }
-    processing = false;
+    });
   }
 
-  // Schedule next frame — inference completes then we request the next
+  // Update overlay
+  overlay.textContent = engine.fps > 0
+    ? `${engine.fps} FPS | ${engine.region}`
+    : engine.region;
+
   animFrame = requestAnimationFrame(processLoop);
 }
 
