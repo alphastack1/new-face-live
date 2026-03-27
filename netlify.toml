@@ -27,13 +27,8 @@
   [headers.values]
     Content-Type = "application/javascript"
 
-# Proxy model downloads through Netlify to avoid CORS issues with GitHub Releases
-# Models are cached in IndexedDB after first download, so bandwidth usage is one-time per user
-[[redirects]]
-  from = "/models-cdn/*"
-  to = "https://github.com/alphastack1/storage/releases/download/newface-v1/:splat"
-  status = 200
-  force = true
+# Model downloads proxied by edge function (netlify/edge-functions/models-proxy.js)
+# Edge function follows GitHub's 302 redirects server-side and adds CORS headers
 
 # Redirect www to apex
 [[redirects]]
