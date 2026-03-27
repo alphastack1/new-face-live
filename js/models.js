@@ -136,12 +136,36 @@ export async function loadModelBytes(name, onProgress) {
 export async function loadSession(name, onProgress) {
   const buf = await loadModelBytes(name, onProgress);
 
-  // Use WASM EP — WebGPU has unsupported ops (AveragePool ceil, etc.) in ORT 1.21
-  // TODO: revisit WebGPU when onnxruntime-web adds full operator coverage
+  // Try WebGPU first (GPU inference is 10-50x faster than WASM CPU)
+  if (navigator.gpu) {
+    try {
+      const session = await ort.InferenceSession.create(buf.slice(0), {
+        executionProviders: ['webgpu'],
+      });
+      console.log(`[Models] ${name} loaded (WebGPU)`);
+      return session;
+    } catch (e) {
+      console.warn(`[Models] ${name} WebGPU failed, using WASM:`, e?.message || String(e));
+    }
+  }
+
+  // Fallback to WASM (runs in proxy worker if ort.env.wasm.proxy = true)
   const session = await ort.InferenceSession.create(buf, {
     executionProviders: ['wasm'],
   });
   console.log(`[Models] ${name} loaded (WASM)`);
+  return session;
+}
+
+/**
+ * Force-create a WASM session for a model (used as runtime fallback when WebGPU inference fails).
+ */
+export async function loadSessionWasm(name) {
+  const buf = await loadModelBytes(name, () => {});
+  const session = await ort.InferenceSession.create(buf, {
+    executionProviders: ['wasm'],
+  });
+  console.log(`[Models] ${name} reloaded (WASM fallback)`);
   return session;
 }
 

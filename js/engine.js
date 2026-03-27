@@ -3,7 +3,7 @@
  * Manages model loading, camera, frame processing loop.
  */
 
-import { loadSession, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js';
+import { loadSession, loadSessionWasm, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js';
 import {
   detectOneFace, alignFace, extractEmbedding, projectEmbedding,
   runSwap, pasteBack, parseFullFrame, createRegionMask,
@@ -115,8 +115,15 @@ export class Engine {
     ctx.drawImage(img, 0, 0);
     const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-    // Detect face
-    const face = await detectOneFace(this.detSession, imgData);
+    // Detect face (with WASM fallback if WebGPU fails at runtime)
+    let face;
+    try {
+      face = await detectOneFace(this.detSession, imgData);
+    } catch (e) {
+      console.warn('[Engine] detect failed, falling back to WASM:', e?.message);
+      this.detSession = await loadSessionWasm('det_10g');
+      face = await detectOneFace(this.detSession, imgData);
+    }
     if (!face) {
       console.warn('[Engine] No face detected in reference image');
       return false;
@@ -127,8 +134,14 @@ export class Engine {
       imgData.data, imgData.width, imgData.height, face.kps, 112
     );
 
-    // Extract embedding
-    this.sourceEmbedding = await extractEmbedding(this.recSession, alignedRGBA);
+    // Extract embedding (with WASM fallback)
+    try {
+      this.sourceEmbedding = await extractEmbedding(this.recSession, alignedRGBA);
+    } catch (e) {
+      console.warn('[Engine] embedding failed, falling back to WASM:', e?.message);
+      this.recSession = await loadSessionWasm('w600k_r50');
+      this.sourceEmbedding = await extractEmbedding(this.recSession, alignedRGBA);
+    }
 
     // Project through emap
     this.sourceLatent = projectEmbedding(this.sourceEmbedding, this.emap);
@@ -154,8 +167,15 @@ export class Engine {
     // Yield helper — lets RAF callbacks fire so the video stays live
     const yieldToUI = () => new Promise(r => setTimeout(r, 0));
 
-    // 1. Detect face in frame
-    const face = await detectOneFace(this.detSession, frameData);
+    // 1. Detect face in frame (with WASM fallback if WebGPU fails at runtime)
+    let face;
+    try {
+      face = await detectOneFace(this.detSession, frameData);
+    } catch (e) {
+      console.warn('[Frame] detect failed, falling back to WASM:', e?.message);
+      this.detSession = await loadSessionWasm('det_10g');
+      face = await detectOneFace(this.detSession, frameData);
+    }
     if (!face) return null;
     console.log(`[Frame] detect ${Math.round(performance.now() - t0)}ms`);
     await yieldToUI();
@@ -165,8 +185,15 @@ export class Engine {
       frameData.data, W, H, face.kps, 128
     );
 
-    // 3. Run face swap
-    const swappedFace = await runSwap(this.swapSession, aligned128, this.sourceLatent);
+    // 3. Run face swap (with WASM fallback)
+    let swappedFace;
+    try {
+      swappedFace = await runSwap(this.swapSession, aligned128, this.sourceLatent);
+    } catch (e) {
+      console.warn('[Frame] swap failed, falling back to WASM:', e?.message);
+      this.swapSession = await loadSessionWasm('inswapper');
+      swappedFace = await runSwap(this.swapSession, aligned128, this.sourceLatent);
+    }
     console.log(`[Frame] swap ${Math.round(performance.now() - t0)}ms`);
     await yieldToUI();
 
@@ -182,7 +209,14 @@ export class Engine {
       const needsParsing = this._shouldReparse(face.bbox);
       if (needsParsing) {
         await yieldToUI();
-        const parsed = await parseFullFrame(this.parseSession, frameData, face.bbox);
+        let parsed;
+        try {
+          parsed = await parseFullFrame(this.parseSession, frameData, face.bbox);
+        } catch (e) {
+          console.warn('[Frame] parse failed, falling back to WASM:', e?.message);
+          this.parseSession = await loadSessionWasm('bisenet');
+          parsed = await parseFullFrame(this.parseSession, frameData, face.bbox);
+        }
         this._cachedParsing = parsed;
         this._cachedParsingBox = [...face.bbox];
         console.log(`[Frame] parse ${Math.round(performance.now() - t0)}ms`);
