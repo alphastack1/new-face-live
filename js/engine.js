@@ -151,39 +151,42 @@ export class Engine {
     const t0 = performance.now();
     const { width: W, height: H } = frameData;
 
+    // Yield helper — lets RAF callbacks fire so the video stays live
+    const yieldToUI = () => new Promise(r => setTimeout(r, 0));
+
     // 1. Detect face in frame
-    console.log('[Frame] Step 1: Detecting face...');
     const face = await detectOneFace(this.detSession, frameData);
-    if (!face) { console.log('[Frame] No face found'); return null; }
-    console.log(`[Frame] Face found in ${Math.round(performance.now() - t0)}ms`);
+    if (!face) return null;
+    console.log(`[Frame] detect ${Math.round(performance.now() - t0)}ms`);
+    await yieldToUI();
 
     // 2. Align target face to 128×128 for swapper
     const { data: aligned128, M } = alignFace(
       frameData.data, W, H, face.kps, 128
     );
-    console.log(`[Frame] Step 2: Aligned in ${Math.round(performance.now() - t0)}ms`);
 
     // 3. Run face swap
-    console.log('[Frame] Step 3: Running swap...');
     const swappedFace = await runSwap(this.swapSession, aligned128, this.sourceLatent);
-    console.log(`[Frame] Swap done in ${Math.round(performance.now() - t0)}ms`);
+    console.log(`[Frame] swap ${Math.round(performance.now() - t0)}ms`);
+    await yieldToUI();
 
     // 4. Paste swapped face back into frame
     const fullSwapped = pasteBack(frameData.data, W, H, swappedFace, M);
-    console.log(`[Frame] Step 4: Pasted in ${Math.round(performance.now() - t0)}ms`);
 
     // 5. Regional masking (if not full-face swap)
     let result;
     if (this.region === 'full') {
       result = blendRegion(frameData.data, fullSwapped, null, this.opacity, W, H);
     } else {
-      // Run parsing (every 3 frames or when bbox moves significantly)
+      // Run parsing infrequently (every 15 frames or when bbox moves)
       const needsParsing = this._shouldReparse(face.bbox);
       if (needsParsing) {
-        console.log('[Frame] Step 5: Running face parse...');
+        await yieldToUI();
         const parsed = await parseFullFrame(this.parseSession, frameData, face.bbox);
         this._cachedParsing = parsed;
         this._cachedParsingBox = [...face.bbox];
+        console.log(`[Frame] parse ${Math.round(performance.now() - t0)}ms`);
+        await yieldToUI();
       }
 
       if (this._cachedParsing) {
@@ -196,7 +199,6 @@ export class Engine {
         result = blendRegion(frameData.data, fullSwapped, null, this.opacity, W, H);
       }
     }
-    console.log(`[Frame] Step 5: Blended in ${Math.round(performance.now() - t0)}ms`);
 
     // 6. Sharpening
     if (this.sharpness > 0) {
@@ -204,7 +206,6 @@ export class Engine {
     }
 
     // FPS tracking
-    const elapsed = performance.now() - t0;
     this._frameTimestamps.push(performance.now());
     while (this._frameTimestamps.length > 30) this._frameTimestamps.shift();
     if (this._frameTimestamps.length > 1) {
@@ -212,6 +213,7 @@ export class Engine {
       this.fps = Math.round((this._frameTimestamps.length - 1) / (span / 1000));
     }
 
+    console.log(`[Frame] total ${Math.round(performance.now() - t0)}ms`);
     return new ImageData(result, W, H);
   }
 
@@ -221,8 +223,8 @@ export class Engine {
   _shouldReparse(bbox) {
     this._parseFrameCount++;
 
-    // Parse every 3 frames
-    if (this._parseFrameCount % 3 !== 0) return false;
+    // Parse every 15 frames (bisenet is expensive in WASM)
+    if (this._parseFrameCount % 15 !== 0) return false;
     if (!this._cachedParsingBox) return true;
 
     // Reparse if bbox moved significantly

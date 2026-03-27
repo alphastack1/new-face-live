@@ -23,7 +23,7 @@ const ARCFACE_DST_112 = [
 const ARCFACE_DST_128 = ARCFACE_DST_112.map(([x, y]) => [x + 8.0, y]);
 
 // Detection model config
-const DET_INPUT_SIZE = 320;
+const DET_INPUT_SIZE = 192;
 const DET_STRIDES = [8, 16, 32];
 const DET_NUM_ANCHORS = 2;
 const DET_SCORE_THRESH = 0.5;
@@ -333,23 +333,60 @@ export function pasteBack(frameRGBA, frameW, frameH, swappedRGBA, M) {
   const size = 128;
   const Minv = invertAffine(M);
 
-  // Warp the swapped face back to frame coordinates
-  const warpedFace = warpAffine(swappedRGBA, size, size, Minv, frameW, frameH);
+  // Compute bounding box of the face in frame coords by projecting the 128×128 corners
+  const corners = [[0,0],[size,0],[size,size],[0,size]];
+  let minX = frameW, minY = frameH, maxX = 0, maxY = 0;
+  for (const [cx, cy] of corners) {
+    const fx = Minv[0][0] * cx + Minv[0][1] * cy + Minv[0][2];
+    const fy = Minv[1][0] * cx + Minv[1][1] * cy + Minv[1][2];
+    if (fx < minX) minX = fx;
+    if (fx > maxX) maxX = fx;
+    if (fy < minY) minY = fy;
+    if (fy > maxY) maxY = fy;
+  }
+  // Pad by 10% and clamp
+  const pad = Math.max((maxX - minX), (maxY - minY)) * 0.1;
+  const bx1 = Math.max(0, Math.floor(minX - pad));
+  const by1 = Math.max(0, Math.floor(minY - pad));
+  const bx2 = Math.min(frameW, Math.ceil(maxX + pad));
+  const by2 = Math.min(frameH, Math.ceil(maxY + pad));
 
-  // Warp the blending mask too
-  const warpedMask = warpAffineMask(SWAP_MASK_128, size, size, Minv, frameW, frameH);
-
-  // Blend
+  // Only iterate within the face bounding box (huge speedup vs full frame)
   const out = new Uint8ClampedArray(frameRGBA);
-  for (let i = 0; i < frameW * frameH; i++) {
-    const alpha = warpedMask[i];
-    if (alpha < 0.001) continue;
+  for (let y = by1; y < by2; y++) {
+    for (let x = bx1; x < bx2; x++) {
+      // Inverse-map frame (x,y) → source (128×128) coords
+      const sx = M[0][0] * x + M[0][1] * y + M[0][2];
+      const sy = M[1][0] * x + M[1][1] * y + M[1][2];
 
-    const pi = i * 4;
-    out[pi]     = frameRGBA[pi]     * (1 - alpha) + warpedFace[pi]     * alpha;
-    out[pi + 1] = frameRGBA[pi + 1] * (1 - alpha) + warpedFace[pi + 1] * alpha;
-    out[pi + 2] = frameRGBA[pi + 2] * (1 - alpha) + warpedFace[pi + 2] * alpha;
-    out[pi + 3] = 255;
+      // Skip if outside 128×128 source
+      if (sx < 0 || sx >= size - 1 || sy < 0 || sy >= size - 1) continue;
+
+      // Bilinear lookup in swap mask
+      const ix = Math.floor(sx), iy = Math.floor(sy);
+      const fx = sx - ix, fy = sy - iy;
+      const mi = iy * size + ix;
+      const alpha =
+        SWAP_MASK_128[mi] * (1 - fx) * (1 - fy) +
+        SWAP_MASK_128[mi + 1] * fx * (1 - fy) +
+        SWAP_MASK_128[mi + size] * (1 - fx) * fy +
+        SWAP_MASK_128[mi + size + 1] * fx * fy;
+
+      if (alpha < 0.001) continue;
+
+      // Bilinear lookup in swapped face
+      const si4 = (iy * size + ix) * 4;
+      const pi = (y * frameW + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        const v =
+          swappedRGBA[si4 + c] * (1 - fx) * (1 - fy) +
+          swappedRGBA[si4 + 4 + c] * fx * (1 - fy) +
+          swappedRGBA[si4 + size * 4 + c] * (1 - fx) * fy +
+          swappedRGBA[si4 + size * 4 + 4 + c] * fx * fy;
+        out[pi + c] = frameRGBA[pi + c] * (1 - alpha) + v * alpha;
+      }
+      out[pi + 3] = 255;
+    }
   }
   return out;
 }
@@ -586,19 +623,17 @@ export function blendRegion(original, swapped, regionMask, opacity, w, h) {
  * @param {number} amount - 0-100
  * @returns {Uint8ClampedArray}
  */
-export function sharpen(rgba, w, h, amount) {
+export function sharpen(rgba, w, h, amount, regionMask) {
   if (amount <= 0) return rgba;
   const strength = amount / 50.0;
-
-  // Extract luminance, blur it, then sharpen
   const out = new Uint8ClampedArray(rgba);
 
-  // Simple 3×3 sharpen kernel approach
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
+      // Skip pixels outside the region mask if provided
+      if (regionMask && regionMask[y * w + x] < 0.001) continue;
       const ci = (y * w + x) * 4;
       for (let c = 0; c < 3; c++) {
-        // 3×3 Laplacian-based sharpen
         const center = rgba[ci + c];
         const blur =
           (rgba[((y-1)*w + x-1) * 4 + c] + rgba[((y-1)*w + x) * 4 + c] + rgba[((y-1)*w + x+1) * 4 + c] +
