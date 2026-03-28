@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#e8af48"/>
+      <stop offset="100%" stop-color="#533517"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <!-- Face outline -->
+  <ellipse cx="64" cy="58" rx="28" ry="32" fill="none" stroke="#fff" stroke-width="4.5" opacity="0.95"/>
+  <!-- Eyes -->
+  <ellipse cx="52" cy="50" rx="5" ry="3" fill="#fff" opacity="0.9"/>
+  <ellipse cx="76" cy="50" rx="5" ry="3" fill="#fff" opacity="0.9"/>
+  <!-- Nose -->
+  <path d="M64 54 L61 64 L67 64 Z" fill="none" stroke="#fff" stroke-width="2.5" stroke-linejoin="round" opacity="0.7"/>
+  <!-- Smile -->
+  <path d="M54 72 Q64 80 74 72" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" opacity="0.9"/>
+  <!-- Sparkle / enhancement indicator -->
+  <circle cx="96" cy="28" r="3" fill="#fff" opacity="0.8"/>
+  <path d="M96 22 V34 M90 28 H102" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+</svg>
