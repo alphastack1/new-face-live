@@ -3,7 +3,26 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>NewFace — Cosmetic Preview</title>
+<title>NewFace — See Your New Look Instantly</title>
+<meta name="description" content="Preview cosmetic changes to your nose, lips, eyes, and more — live on camera. Powered by AI, 100% private, runs entirely in your browser.">
+
+<!-- Open Graph / Link Share Card -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://newface.live/">
+<meta property="og:title" content="NewFace — See Your New Look Instantly">
+<meta property="og:description" content="Preview cosmetic changes live on camera. AI-powered, 100% private, no install needed.">
+<meta property="og:image" content="https://newface.live/og-image.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="NewFace — See Your New Look Instantly">
+<meta name="twitter:description" content="Preview cosmetic changes live on camera. AI-powered, 100% private, no install needed.">
+<meta name="twitter:image" content="https://newface.live/og-image.jpg">
+
+<!-- Favicon -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect rx='20' width='100' height='100' fill='%23533517'/><circle cx='50' cy='45' r='22' fill='none' stroke='%23e8af48' stroke-width='4'/><path d='M35 62 Q50 75 65 62' fill='none' stroke='%23e8af48' stroke-width='3' stroke-linecap='round'/></svg>">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -248,9 +267,18 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);heigh
 
 <div class="toasts" id="toasts"></div>
 
+<!-- Suppress WASM-internal ORT warnings that bypass JS log filtering -->
+<script>
+(function(){
+  const _origWarn = console.warn.bind(console);
+  const _origErr  = console.error.bind(console);
+  const SQUELCH = /VerifyOutputSizes|Expected shape from model/;
+  console.warn  = function(){ if (typeof arguments[0]==='string' && SQUELCH.test(arguments[0])) return; _origWarn.apply(console, arguments); };
+  console.error = function(){ if (typeof arguments[0]==='string' && SQUELCH.test(arguments[0])) return; _origErr.apply(console, arguments); };
+})();
+</script>
 <!-- ORT WebGPU -->
-<!-- Using non-minified build temporarily for debugging WebGPU errors -->
-<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.webgpu.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.webgpu.min.js"></script>
 
 <script type="module">
 import { Engine } from './js/engine.js?v=15';
@@ -436,7 +464,7 @@ function drawVideoFrame() {
 function captureFrame() {
   if (!captureCanvas || captureCanvas.width !== canvas.width || captureCanvas.height !== canvas.height) {
     captureCanvas = new OffscreenCanvas(canvas.width, canvas.height);
-    captureCtx = captureCanvas.getContext('2d');
+    captureCtx = captureCanvas.getContext('2d', { willReadFrequently: true });
   }
   if (mirror) {
     captureCtx.save();

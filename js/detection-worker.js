@@ -12,6 +12,14 @@
  *   { type: 'error', message, id? }
  */
 
+// Suppress WASM-internal ORT warnings that bypass JS log filtering
+(function(){
+  const _w = console.warn.bind(console), _e = console.error.bind(console);
+  const RE = /VerifyOutputSizes|Expected shape from model/;
+  console.warn  = function(){ if (typeof arguments[0]==='string' && RE.test(arguments[0])) return; _w.apply(console, arguments); };
+  console.error = function(){ if (typeof arguments[0]==='string' && RE.test(arguments[0])) return; _e.apply(console, arguments); };
+})();
+
 importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.min.js');
 
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/';
@@ -49,14 +57,14 @@ function preprocessDetect(pixels, width, height) {
   // Resize using cached OffscreenCanvases
   if (!srcCanvas || srcCanvas.width !== W || srcCanvas.height !== H) {
     srcCanvas = new OffscreenCanvas(W, H);
-    srcCtx = srcCanvas.getContext('2d');
+    srcCtx = srcCanvas.getContext('2d', { willReadFrequently: true });
   }
   const imgData = new ImageData(pixels, W, H);
   srcCtx.putImageData(imgData, 0, 0);
 
   if (!resCanvas) {
     resCanvas = new OffscreenCanvas(size, size);
-    resCtx = resCanvas.getContext('2d');
+    resCtx = resCanvas.getContext('2d', { willReadFrequently: true });
   }
   resCtx.clearRect(0, 0, size, size);
   resCtx.drawImage(srcCanvas, 0, 0, W, H, 0, 0, newW, newH);

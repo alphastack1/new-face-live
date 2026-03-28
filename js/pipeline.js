@@ -73,13 +73,13 @@ export function preprocessDetect(imgData) {
 
   if (!_detSrcCanvas || _detSrcCanvas.width !== W || _detSrcCanvas.height !== H) {
     _detSrcCanvas = new OffscreenCanvas(W, H);
-    _detSrcCtx = _detSrcCanvas.getContext('2d');
+    _detSrcCtx = _detSrcCanvas.getContext('2d', { willReadFrequently: true });
   }
   _detSrcCtx.putImageData(imgData, 0, 0);
 
   if (!_detResCanvas) {
     _detResCanvas = new OffscreenCanvas(size, size);
-    _detResCtx = _detResCanvas.getContext('2d');
+    _detResCtx = _detResCanvas.getContext('2d', { willReadFrequently: true });
   }
   _detResCtx.clearRect(0, 0, size, size);
   _detResCtx.drawImage(_detSrcCanvas, 0, 0, W, H, 0, 0, newW, newH);
@@ -344,13 +344,13 @@ export async function parseFace(session, cropRGBA, cropW, cropH) {
   // Reuse cached canvases
   if (!_parseSrcCanvas || _parseSrcCanvas.width !== cropW || _parseSrcCanvas.height !== cropH) {
     _parseSrcCanvas = new OffscreenCanvas(cropW, cropH);
-    _parseSrcCtx = _parseSrcCanvas.getContext('2d');
+    _parseSrcCtx = _parseSrcCanvas.getContext('2d', { willReadFrequently: true });
   }
   _parseSrcCtx.putImageData(new ImageData(cropRGBA, cropW, cropH), 0, 0);
 
   if (!_parseResCanvas) {
     _parseResCanvas = new OffscreenCanvas(size, size);
-    _parseResCtx = _parseResCanvas.getContext('2d');
+    _parseResCtx = _parseResCanvas.getContext('2d', { willReadFrequently: true });
   }
   _parseResCtx.drawImage(_parseSrcCanvas, 0, 0, cropW, cropH, 0, 0, size, size);
   const resized = _parseResCtx.getImageData(0, 0, size, size).data;
