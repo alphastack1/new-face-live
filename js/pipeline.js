@@ -19,8 +19,9 @@ const ARCFACE_DST_112 = [
   [70.7299, 92.2041],  // right mouth
 ];
 
-// For 128×128 inswapper input: same points but shifted +8px in x
-const ARCFACE_DST_128 = ARCFACE_DST_112.map(([x, y]) => [x + 8.0, y]);
+// For 128×128 inswapper input: scale all coordinates from 112-space to 128-space
+// (insightface does: src = arcface_src * image_size / 112)
+const ARCFACE_DST_128 = ARCFACE_DST_112.map(([x, y]) => [x * 128 / 112, y * 128 / 112]);
 
 // Detection model config
 const DET_INPUT_SIZE = 192;
