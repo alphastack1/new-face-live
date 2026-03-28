@@ -173,6 +173,30 @@ export class Engine {
     const swappedFace = await runSwap(this.swapSession, aligned128, this.sourceLatent);
     console.log(`[Frame] swap ${Math.round(performance.now() - t0)}ms`);
 
+    // Debug: show raw 128x128 input & output side by side
+    if (!this._debugCanvasCreated) {
+      this._debugCanvasCreated = true;
+      const dc = document.createElement('canvas');
+      dc.id = 'debugSwap';
+      dc.width = 256; dc.height = 128;
+      dc.style.cssText = 'position:fixed;top:10px;right:10px;z-index:9999;border:2px solid red;background:#000;';
+      document.body.appendChild(dc);
+      const label = document.createElement('div');
+      label.style.cssText = 'position:fixed;top:142px;right:10px;z-index:9999;color:red;font:12px monospace;background:#000;padding:2px;';
+      label.textContent = 'LEFT=input  RIGHT=swap output';
+      document.body.appendChild(label);
+    }
+    const dc = document.getElementById('debugSwap');
+    if (dc) {
+      const ctx = dc.getContext('2d');
+      // Draw aligned input (left)
+      const inImg = new ImageData(new Uint8ClampedArray(aligned128), 128, 128);
+      ctx.putImageData(inImg, 0, 0);
+      // Draw swap output (right)
+      const outImg = new ImageData(new Uint8ClampedArray(swappedFace), 128, 128);
+      ctx.putImageData(outImg, 128, 0);
+    }
+
     await yieldToUI();
 
     // 4. Paste swapped face back into frame
