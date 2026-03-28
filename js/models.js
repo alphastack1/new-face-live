@@ -122,8 +122,12 @@ export async function loadModelBytes(name, onProgress) {
     if (onProgress) onProgress(loaded, total || info.size, name);
   });
 
-  // Cache for next time
-  await cachePut(name, buf);
+  // Cache for next time (non-fatal — private browsing may block storage)
+  try {
+    await cachePut(name, buf);
+  } catch (e) {
+    console.warn(`[Models] Cache write failed for ${name} (non-fatal):`, e.message);
+  }
   return buf;
 }
 
@@ -147,6 +151,7 @@ export async function loadSession(name, onProgress) {
     graphOptimizationLevel: 'all',
     enableCpuMemArena: true,
     enableMemPattern: true,
+    logSeverityLevel: 3,
   });
   console.log(`[Models] ✅ ${name} loaded (WebGPU)`);
   return session;
@@ -163,6 +168,7 @@ export async function loadSessionWasm(name, onProgress) {
     graphOptimizationLevel: 'all',
     enableCpuMemArena: true,
     enableMemPattern: true,
+    logSeverityLevel: 3,
   });
   console.log(`[Models] ✅ ${name} loaded (WASM)`);
   return session;
@@ -197,6 +203,7 @@ export async function loadSessionPreferGPU(name, onProgress) {
     graphOptimizationLevel: 'all',
     enableCpuMemArena: true,
     enableMemPattern: true,
+    logSeverityLevel: 3,
   });
   console.log(`[Models] ✅ ${name} loaded (WASM fallback)`);
   return session;

@@ -16,14 +16,14 @@ importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.min.
 
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/';
 ort.env.wasm.numThreads = 1;  // Worker is already a separate thread
-ort.env.logLevel = 'warning';
+ort.env.logLevel = 'error';
 
 // ── Detection Constants ──────────────────────────────────────────
 
 const DET_INPUT_SIZE = 192;
 const DET_STRIDES = [8, 16, 32];
 const DET_NUM_ANCHORS = 2;
-const DET_SCORE_THRESH = 0.5;
+const DET_SCORE_THRESH = 0.3;
 const DET_NMS_THRESH = 0.4;
 
 // ── State ────────────────────────────────────────────────────────
@@ -182,7 +182,12 @@ async function detectFaces(pixels, width, height) {
 async function detectOneFace(pixels, width, height) {
   const faces = await detectFaces(pixels, width, height);
   if (faces.length === 0) return null;
-  faces.sort((a, b) => a.bbox[0] - b.bbox[0]);
+  // Pick the largest face (best for single-user webcam)
+  faces.sort((a, b) => {
+    const areaA = (a.bbox[2] - a.bbox[0]) * (a.bbox[3] - a.bbox[1]);
+    const areaB = (b.bbox[2] - b.bbox[0]) * (b.bbox[3] - b.bbox[1]);
+    return areaB - areaA;
+  });
   return faces[0];
 }
 
@@ -198,6 +203,7 @@ self.onmessage = async (e) => {
         graphOptimizationLevel: 'all',
         enableCpuMemArena: true,
         enableMemPattern: true,
+        logSeverityLevel: 3,
       });
       self.postMessage({ type: 'ready' });
     } catch (err) {
@@ -212,9 +218,9 @@ self.onmessage = async (e) => {
         e.data.width,
         e.data.height
       );
-      self.postMessage({ type: 'result', face, id: e.data.id });
+      self.postMessage({ type: 'result', face, id: e.data.id, gen: e.data.gen });
     } catch (err) {
-      self.postMessage({ type: 'error', message: err.message, id: e.data.id });
+      self.postMessage({ type: 'error', message: err.message, id: e.data.id, gen: e.data.gen });
     }
   }
 };

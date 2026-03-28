@@ -25,7 +25,7 @@ const ARCFACE_DST_128 = ARCFACE_DST_112.map(([x, y]) => [x + 8.0, y]);
 const DET_INPUT_SIZE = 192;
 const DET_STRIDES = [8, 16, 32];
 const DET_NUM_ANCHORS = 2;
-const DET_SCORE_THRESH = 0.5;
+const DET_SCORE_THRESH = 0.3;
 const DET_NMS_THRESH = 0.4;
 
 const REGION_CLASSES = {
@@ -162,7 +162,12 @@ export async function detectFaces(session, imgData) {
 export async function detectOneFace(session, imgData) {
   const faces = await detectFaces(session, imgData);
   if (faces.length === 0) return null;
-  faces.sort((a, b) => a.bbox[0] - b.bbox[0]);
+  // Pick the largest face (best for single-user webcam)
+  faces.sort((a, b) => {
+    const areaA = (a.bbox[2] - a.bbox[0]) * (a.bbox[3] - a.bbox[1]);
+    const areaB = (b.bbox[2] - b.bbox[0]) * (b.bbox[3] - b.bbox[1]);
+    return areaB - areaA;
+  });
   return faces[0];
 }
 
@@ -406,12 +411,19 @@ export async function parseFullFrame(session, frameData, bbox) {
   return { labels, cropBox: [x1, y1, x2, y2], cropW, cropH };
 }
 
+let _regionMaskBuf = null;
+let _cropMaskBuf = null;
+
 export function createRegionMask(labels, cropW, cropH, region, cropBox, kps, frameW, frameH) {
   const classes = REGION_CLASSES[region];
   if (!classes) return null;
 
-  const cropMask = new Uint8Array(cropW * cropH);
-  for (let i = 0; i < cropW * cropH; i++) {
+  const cropLen = cropW * cropH;
+  if (!_cropMaskBuf || _cropMaskBuf.length < cropLen) {
+    _cropMaskBuf = new Uint8Array(cropLen);
+  }
+  const cropMask = _cropMaskBuf;
+  for (let i = 0; i < cropLen; i++) {
     cropMask[i] = classes.includes(labels[i]) ? 255 : 0;
   }
 
@@ -426,7 +438,12 @@ export function createRegionMask(labels, cropW, cropH, region, cropBox, kps, fra
   }
 
   const [x1, y1] = cropBox;
-  const fullMask = new Float32Array(frameW * frameH);
+  const frameLen = frameW * frameH;
+  if (!_regionMaskBuf || _regionMaskBuf.length !== frameLen) {
+    _regionMaskBuf = new Float32Array(frameLen);
+  }
+  const fullMask = _regionMaskBuf;
+  fullMask.fill(0);
   for (let y = 0; y < cropH; y++) {
     for (let x = 0; x < cropW; x++) {
       fullMask[(y1 + y) * frameW + (x1 + x)] = cropMask[y * cropW + x] / 255.0;
@@ -444,8 +461,14 @@ export function createRegionMask(labels, cropW, cropH, region, cropBox, kps, fra
   return fullMask;
 }
 
+let _blurTempBuf = null;
+
 function gaussianBlurInPlace(data, w, h, radius) {
-  const temp = new Float32Array(w * h);
+  const len = w * h;
+  if (!_blurTempBuf || _blurTempBuf.length !== len) {
+    _blurTempBuf = new Float32Array(len);
+  }
+  const temp = _blurTempBuf;
 
   for (let pass = 0; pass < 3; pass++) {
     for (let y = 0; y < h; y++) {
@@ -505,10 +528,17 @@ export function blendRegion(original, swapped, regionMask, opacity, w, h, outBuf
   return out;
 }
 
+let _sharpenBuf = null;
+
 export function sharpen(rgba, w, h, amount, regionMask) {
   if (amount <= 0) return rgba;
   const strength = amount / 50.0;
-  const out = new Uint8ClampedArray(rgba);
+  const len = w * h * 4;
+  if (!_sharpenBuf || _sharpenBuf.length !== len) {
+    _sharpenBuf = new Uint8ClampedArray(len);
+  }
+  _sharpenBuf.set(rgba);
+  const out = _sharpenBuf;
 
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {

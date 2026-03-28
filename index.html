@@ -292,42 +292,47 @@ const refScroll = document.getElementById('refScroll');
 // Show total model size
 loadSize.textContent = `One-time ~838 MB download — cached locally after first use`;
 
+// ── Suppress ORT WASM shape-mismatch warnings ──────────────────
+// det_10g is exported for 640x640 but we run at 192x192. ORT's C++ runtime
+// logs "VerifyOutputSizes" warnings every inference — harmless but spammy.
+const _origWarn = console.warn;
+console.warn = function(...args) {
+  if (typeof args[0] === 'string' && args[0].includes('VerifyOutputSizes')) return;
+  _origWarn.apply(console, args);
+};
+
 // ── WASM paths for ORT ───────────────────────────────────────────
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/';
 ort.env.wasm.proxy = false;  // Must be false — proxy mode is incompatible with WebGPU
 ort.env.wasm.numThreads = Math.min(navigator.hardwareConcurrency || 4, 4);
-ort.env.logLevel = 'warning';  // Suppress verbose ORT logging
+ort.env.logLevel = 'error';  // Suppress all ORT warnings — only log actual errors
 
-// ── WebGPU diagnostics ──────────────────────────────────────────
-(async () => {
-  console.log('[WebGPU] navigator.gpu:', navigator.gpu);
-  console.log('[WebGPU] typeof navigator.gpu:', typeof navigator.gpu);
-  if (navigator.gpu) {
-    try {
-      const adapter = await navigator.gpu.requestAdapter();
-      console.log('[WebGPU] adapter:', adapter);
-      if (adapter) {
-        const info = adapter.info || {};
-        console.log('[WebGPU] adapter info:', JSON.stringify(info));
-        const device = await adapter.requestDevice();
-        console.log('[WebGPU] device acquired:', !!device);
-      } else {
-        console.warn('[WebGPU] No adapter available — GPU may not support WebGPU');
-      }
-    } catch (e) {
-      console.error('[WebGPU] Error requesting adapter/device:', e);
-    }
+// ── WebGPU check (minimal — no device creation) ─────────────────
+if (!navigator.gpu) {
+  console.warn('[NewFace] WebGPU not available — app requires WebGPU');
+}
+
+// ── Device Capability Check ──────────────────────────────────────
+const _isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+const _hasWebGPU = !!navigator.gpu;
+
+if (!_hasWebGPU) {
+  loadBtn.textContent = 'Not supported on this device';
+  loadBtn.disabled = true;
+  loadBtn.style.opacity = '0.5';
+  if (_isMobile) {
+    loadSize.innerHTML = 'NewFace requires WebGPU, which isn\u2019t available on most mobile browsers yet.<br>Please visit <b>newface.live</b> on a desktop or laptop with Chrome, Edge, or Brave.';
   } else {
-    console.error('[WebGPU] navigator.gpu is NOT available. WebGPU is not supported in this browser.');
-    console.log('[WebGPU] User Agent:', navigator.userAgent);
+    loadSize.innerHTML = 'NewFace requires WebGPU, which your browser doesn\u2019t support.<br>Please try <b>Chrome 113+</b>, <b>Edge 113+</b>, or <b>Brave</b> with a dedicated GPU.';
   }
-  // Check ORT version and available EPs
-  console.log('[ORT] version:', ort?.env?.versions?.web || 'unknown');
-  console.log('[ORT] ort object keys:', Object.keys(ort).slice(0, 20));
-})();
+  loadSize.style.color = '#e8c87a';
+}
 
 // ── Loading ──────────────────────────────────────────────────────
+let _isLoading = false;
 window.startLoading = async function() {
+  if (_isLoading) return;
+  _isLoading = true;
   loadBtn.disabled = true;
   loadBtn.textContent = 'Loading...';
   progWrap.style.display = '';
@@ -348,8 +353,8 @@ window.startLoading = async function() {
     stTxt.textContent = 'Ready';
     loadScreen.classList.add('hid');
     liveWrap.classList.add('on');
-    loadPrefs();
     renderRefs();
+    loadPrefs();
     toast('Models loaded! Tap Start to begin.', 'ok');
   } catch (err) {
     console.error('Model load error:', err);
@@ -357,6 +362,7 @@ window.startLoading = async function() {
     dot.className = 'dot';
     stTxt.textContent = 'Error';
     progText.textContent = 'Error: ' + msg;
+    _isLoading = false;
     loadBtn.disabled = false;
     loadBtn.textContent = 'Retry';
     toast('Failed to load models: ' + msg, 'err');
@@ -364,12 +370,15 @@ window.startLoading = async function() {
 };
 
 // ── Camera ───────────────────────────────────────────────────────
+let _cameraTransitioning = false;
 window.toggleCamera = async function() {
+  if (_cameraTransitioning) return;
   if (camRunning) {
     stopCamera();
     return;
   }
 
+  _cameraTransitioning = true;
   try {
     camStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
@@ -382,13 +391,21 @@ window.toggleCamera = async function() {
     canvas.height = video.videoHeight;
 
     camRunning = true;
+    engine._frameTimestamps = [];  // Reset FPS tracking
     const btn = document.getElementById('btnStart');
     btn.className = 'b stop';
     btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/></svg> Stop';
 
     processLoop();
   } catch (err) {
-    toast('Camera access denied: ' + err.message, 'err');
+    const friendly = {
+      NotAllowedError: 'Camera access was blocked. Please allow camera permission in your browser settings.',
+      NotFoundError: 'No camera found. Please connect a camera.',
+      NotReadableError: 'Camera is in use by another application.',
+    }[err.name] || ('Camera error: ' + err.message);
+    toast(friendly, 'err');
+  } finally {
+    _cameraTransitioning = false;
   }
 };
 
@@ -454,26 +471,33 @@ async function processLoop() {
   // Start inference if not already running and we have a reference
   if (!processing && engine.sourceLatent) {
     processing = true;
-    // Capture fresh video frame via offscreen canvas (no visible canvas round-trip)
-    const frameData = captureFrame();
+    try {
+      // Capture fresh video frame via offscreen canvas (no visible canvas round-trip)
+      const frameData = captureFrame();
 
-    // Run inference async — don't block the render loop
-    engine.processFrame(frameData).then(result => {
-      if (result) {
-        lastResult = result;
-      }
-      frameErrors = 0;
+      // Run inference async — don't block the render loop
+      engine.processFrame(frameData).then(result => {
+        if (result) {
+          lastResult = result;
+        } else if (!engine._settingReference) {
+          // Face lost — clear stale overlay so raw video shows
+          lastResult = null;
+        }
+        frameErrors = 0;
+        processing = false;
+      }).catch(err => {
+        frameErrors++;
+        console.error('[Loop] Frame error:', err);
+        processing = false;
+        if (frameErrors > 10) {
+          toast('Too many errors — stopping camera', 'err');
+          stopCamera();
+        }
+      });
+    } catch (err) {
+      console.error('[Loop] Sync error:', err);
       processing = false;
-    }).catch(err => {
-      frameErrors++;
-      console.error('[Loop] Frame error:', err);
-      processing = false;
-      if (frameErrors > 10) {
-        toast('Too many errors — stopping camera', 'err');
-        stopCamera();
-        return;
-      }
-    });
+    }
   }
 
   // Update overlay
@@ -547,13 +571,20 @@ async function selectRef(fn) {
     c.classList.toggle('sel', c.querySelector('img')?.src.endsWith(fn));
   });
 
+  // Clear previous swap overlay immediately so stale face doesn't linger
+  lastResult = null;
+
   // Set reference in engine
   toast('Setting reference...', '');
   const ok = await engine.setReference('references/' + fn);
   if (ok) {
     toast('Reference set: ' + fn, 'ok');
-  } else {
+  } else if (currentRef === fn) {
+    // Only show error if this wasn't superseded by another click
     toast('No face detected in reference', 'err');
+    // Revert UI highlight — no valid reference is active for this selection
+    document.querySelectorAll('.ref-c').forEach(c => c.classList.remove('sel'));
+    currentRef = null;
   }
   savePrefs();
 }
@@ -591,8 +622,8 @@ function loadPrefs() {
     if (p.cat) setCat(p.cat);
     if (p.ref) {
       currentRef = p.ref;
-      // Defer reference loading until after render
-      setTimeout(() => selectRef(p.ref), 500);
+      // Defer reference loading until after DOM render
+      requestAnimationFrame(() => selectRef(p.ref));
     }
   } catch (e) { /* ignore */ }
 }

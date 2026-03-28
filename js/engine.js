@@ -31,7 +31,10 @@ export class Engine {
     this._workerReqId = 1;  // Start at 1; frame detection uses id=0
     this._workerCallbacks = new Map();
     this._latestDetection = null;
+    this._latestDetectionTime = 0;  // Timestamp of last successful detection
+    this._consecutiveMisses = 0;    // Count of consecutive null detections from worker
     this._workerBusySince = 0;  // Timestamp for stuck-detection recovery
+    this._detGeneration = 0;    // Incremented on ref switch; stale results ignored
 
     // State
     this.ready = false;
@@ -60,40 +63,52 @@ export class Engine {
   // ── Model Loading ──────────────────────────────────────────────
 
   async init(onProgress) {
-    const sizes = {
-      det_10g: 16_923_827,
-      w600k_r50: 174_383_860,
-      inswapper: 277_680_638,
-      bisenet: 93_632_546,
-      emap: 1_048_576,
-    };
-    const totalSize = Object.values(sizes).reduce((a, b) => a + b, 0);
+    const ts = totalModelSize();
     const loaded = { det_10g: 0, w600k_r50: 0, inswapper: 0, bisenet: 0, emap: 0 };
 
     const progress = (l, t, name) => {
       loaded[name] = l;
       const overallLoaded = Object.values(loaded).reduce((a, b) => a + b, 0);
-      if (onProgress) onProgress(name, l, t, overallLoaded / totalSize);
+      if (onProgress) onProgress(name, l, t, Math.min(1, overallLoaded / ts));
     };
+
+    // Terminate old worker on retry
+    if (this._detWorker) {
+      this._detWorker.terminate();
+      this._detWorker = null;
+      this._workerReady = false;
+      this._workerDead = false;
+      this._workerBusy = false;
+    }
 
     console.log('[Engine] Loading det_10g...');
     const detBytes = await loadModelBytes('det_10g', progress);
     await this._initDetectionWorker(detBytes);
 
-    console.log('[Engine] Loading det_10g (WASM, for ref detection)...');
-    this.detSession = await loadSessionWasm('det_10g', () => {});
+    if (!this.detSession) {
+      console.log('[Engine] Loading det_10g (WASM, for ref detection)...');
+      this.detSession = await loadSessionWasm('det_10g', () => {});
+    }
 
-    console.log('[Engine] Loading w600k_r50 (WASM)...');
-    this.recSession = await loadSessionWasm('w600k_r50', progress);
+    if (!this.recSession) {
+      console.log('[Engine] Loading w600k_r50 (WASM)...');
+      this.recSession = await loadSessionWasm('w600k_r50', progress);
+    }
 
-    console.log('[Engine] Loading inswapper (WebGPU)...');
-    this.swapSession = await loadSession('inswapper', progress);
+    if (!this.swapSession) {
+      console.log('[Engine] Loading inswapper (WebGPU)...');
+      this.swapSession = await loadSession('inswapper', progress);
+    }
 
-    console.log('[Engine] Loading bisenet (WebGPU)...');
-    this.parseSession = await loadSession('bisenet', progress);
+    if (!this.parseSession) {
+      console.log('[Engine] Loading bisenet (WebGPU)...');
+      this.parseSession = await loadSession('bisenet', progress);
+    }
 
-    console.log('[Engine] Loading emap...');
-    this.emap = await loadEmap(progress);
+    if (!this.emap) {
+      console.log('[Engine] Loading emap...');
+      this.emap = await loadEmap(progress);
+    }
 
     console.log('[Engine] Pre-warming sessions...');
     await this._warmup();
@@ -123,9 +138,19 @@ export class Engine {
             this._workerCallbacks.delete(e.data.id);
             cb(e.data.face);
           } else {
-            // Frame detection — only update if face found (prevents flicker)
-            if (e.data.face) {
+            // Frame detection — discard results from old generation (stale after ref switch)
+            if (e.data.gen !== undefined && e.data.gen !== this._detGeneration) {
+              // Stale result from before reference switch — ignore
+            } else if (e.data.face) {
               this._latestDetection = e.data.face;
+              this._latestDetectionTime = performance.now();
+              this._consecutiveMisses = 0;
+            } else {
+              // Worker found no face — track consecutive misses
+              this._consecutiveMisses++;
+              if (this._consecutiveMisses >= 3) {
+                this._latestDetection = null;  // Face truly lost
+              }
             }
           }
         }
@@ -183,7 +208,7 @@ export class Engine {
 
     const pixelsCopy = frameData.data.buffer.slice(0);
     this._detWorker.postMessage(
-      { type: 'detect', pixels: pixelsCopy, width: frameData.width, height: frameData.height, id: 0 },
+      { type: 'detect', pixels: pixelsCopy, width: frameData.width, height: frameData.height, id: 0, gen: this._detGeneration },
       [pixelsCopy]
     );
   }
@@ -247,16 +272,22 @@ export class Engine {
 
       this.sourceLatent = projectEmbedding(this.sourceEmbedding, this.emap);
 
-      // Clear caches
+      // Clear caches and bump generation so in-flight worker results are discarded
+      this._detGeneration++;
       this._latestDetection = null;
+      this._latestDetectionTime = 0;
+      this._consecutiveMisses = 0;
       this._cachedParsing = null;
       this._parseFrameCount = 0;
 
       console.log('[Engine] Reference face set');
       return true;
     } finally {
-      // Always clear — if another setReference superseded us, it set its own flag
-      this._settingReference = false;
+      // Only clear if we're still the latest setReference call.
+      // If another call superseded us, it owns the flag and will clear it.
+      if (this._refVersion === myVersion) {
+        this._settingReference = false;
+      }
     }
   }
 
@@ -270,7 +301,9 @@ export class Engine {
     this._processingFrame = true;
 
     try {
-      const result = await this._processFrameInner(frameData);
+      const promise = this._processFrameInner(frameData);
+      this._frameInProgress = promise;  // Expose so setReference can wait
+      const result = await promise;
       return result;
     } catch (err) {
       console.error('[Engine] processFrame error:', err);
@@ -287,8 +320,13 @@ export class Engine {
     // Send this frame to the worker for NEXT detection (pipeline)
     this._sendFrameToWorker(frameData);
 
-    // Use the latest detection result from the worker
+    // Use the latest detection result from the worker (if fresh enough)
     let face = this._latestDetection;
+    if (face && this._latestDetectionTime > 0 && (performance.now() - this._latestDetectionTime) > 2000) {
+      // Detection is stale (>2s old) — discard it
+      face = null;
+      this._latestDetection = null;
+    }
     if (!face) {
       // No detection yet — run on main thread for first frame (or if worker is dead)
       try {
@@ -328,7 +366,8 @@ export class Engine {
     if (this.region === 'full') {
       result = blendRegion(frameData.data, fullSwapped, null, this.opacity, W, H, this._blendBuf);
     } else {
-      const needsParsing = this._shouldReparse(face.bbox);
+      // Force reparse if we have no cached parsing (e.g. after ref switch)
+      const needsParsing = !this._cachedParsing || this._shouldReparse(face.bbox);
       if (needsParsing) {
         try {
           const parsed = await parseFullFrame(this.parseSession, frameData, face.bbox);
@@ -348,7 +387,8 @@ export class Engine {
         );
         result = blendRegion(frameData.data, fullSwapped, mask, this.opacity, W, H, this._blendBuf);
       } else {
-        result = blendRegion(frameData.data, fullSwapped, null, this.opacity, W, H, this._blendBuf);
+        // No parsing data yet — show raw frame rather than full-face swap
+        return null;
       }
     }
 
@@ -357,12 +397,9 @@ export class Engine {
       result = sharpen(result, W, H, this.sharpness);
     }
 
-    // 6. Clone result before wrapping in ImageData — the underlying buffer
-    // (_blendBuf) will be overwritten on the next frame. ImageData shares
-    // the buffer, so without cloning the displayed frame could be corrupted.
-    const outputData = (result === this._blendBuf || result === this._pasteBuf)
-      ? new Uint8ClampedArray(result)
-      : result;
+    // 6. Clone result before wrapping in ImageData — all pipeline buffers
+    // are pre-allocated and reused, so we must clone to prevent corruption.
+    const outputData = new Uint8ClampedArray(result);
 
     // FPS tracking
     const now = performance.now();
