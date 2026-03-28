@@ -3,12 +3,12 @@
  * Manages model loading, camera, frame processing loop.
  */
 
-import { loadSession, loadSessionWasm, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=10';
+import { loadSession, loadSessionWasm, loadSessionPreferGPU, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=11';
 import {
   detectOneFace, alignFace, extractEmbedding, projectEmbedding,
   runSwap, pasteBack, parseFullFrame, createRegionMask,
   blendRegion, sharpen,
-} from './pipeline.js?v=10';
+} from './pipeline.js?v=11';
 
 export class Engine {
   constructor() {
@@ -72,12 +72,12 @@ export class Engine {
     };
 
     // Load models (sequentially to avoid memory pressure)
-    // det_10g: WASM — WebGPU lacks AveragePool ceil_mode support
+    // det_10g: Try WebGPU first, fall back to WASM
     // w600k_r50: WASM — has ops WebGPU can't create session for (runs once, no perf impact)
     // inswapper: WebGPU REQUIRED — runs every frame, 20s on WASM vs <100ms on GPU
     // bisenet: WebGPU — runs every 15 frames for face parsing
-    console.log('[Engine] Loading det_10g (WASM)...');
-    this.detSession = await loadSessionWasm('det_10g', progress);
+    console.log('[Engine] Loading det_10g...');
+    this.detSession = await loadSessionPreferGPU('det_10g', progress);
 
     console.log('[Engine] Loading w600k_r50 (WASM)...');
     this.recSession = await loadSessionWasm('w600k_r50', progress);
@@ -91,8 +91,29 @@ export class Engine {
     console.log('[Engine] Loading emap...');
     this.emap = await loadEmap(progress);
 
+    // Pre-warm sessions with dummy inference to trigger shader compilation
+    console.log('[Engine] Pre-warming sessions...');
+    await this._warmup();
+
     this.ready = true;
     console.log('[Engine] All models loaded. Ready.');
+  }
+
+  async _warmup() {
+    try {
+      // Warm det_10g (192×192 input)
+      const detInput = new ort.Tensor('float32', new Float32Array(1 * 3 * 192 * 192), [1, 3, 192, 192]);
+      await this.detSession.run({ [this.detSession.inputNames[0]]: detInput });
+
+      // Warm inswapper (128×128 + 512 latent)
+      const swapImg = new ort.Tensor('float32', new Float32Array(1 * 3 * 128 * 128), [1, 3, 128, 128]);
+      const swapSrc = new ort.Tensor('float32', new Float32Array(512), [1, 512]);
+      await this.swapSession.run({ 'target': swapImg, 'source': swapSrc });
+
+      console.log('[Engine] Warmup complete');
+    } catch (e) {
+      console.warn('[Engine] Warmup error (non-fatal):', e.message);
+    }
   }
 
   // ── Reference Face ─────────────────────────────────────────────

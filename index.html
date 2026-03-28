@@ -253,7 +253,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);heigh
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.webgpu.js"></script>
 
 <script type="module">
-import { Engine } from './js/engine.js?v=10';
+import { Engine } from './js/engine.js?v=11';
 
 // ── Reference images registry ────────────────────────────────────
 const REFS = {
@@ -295,6 +295,8 @@ loadSize.textContent = `One-time ~838 MB download — cached locally after first
 // ── WASM paths for ORT ───────────────────────────────────────────
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/';
 ort.env.wasm.proxy = false;  // Must be false — proxy mode is incompatible with WebGPU
+ort.env.wasm.numThreads = Math.min(navigator.hardwareConcurrency || 4, 4);
+ort.env.logLevel = 'warning';  // Suppress verbose ORT logging
 
 // ── WebGPU diagnostics ──────────────────────────────────────────
 (async () => {

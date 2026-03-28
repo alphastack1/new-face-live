@@ -143,7 +143,10 @@ export async function loadSession(name, onProgress) {
   console.log(`[Models] ${name}: creating WebGPU session...`);
   const session = await ort.InferenceSession.create(buf, {
     executionProviders: ['webgpu'],
-    preferredOutputLocation: 'cpu',  // Ensure outputs are copied back from GPU
+    preferredOutputLocation: 'cpu',
+    graphOptimizationLevel: 'all',
+    enableCpuMemArena: true,
+    enableMemPattern: true,
   });
   console.log(`[Models] ✅ ${name} loaded (WebGPU)`);
   return session;
@@ -157,8 +160,45 @@ export async function loadSessionWasm(name, onProgress) {
   console.log(`[Models] ${name}: creating WASM session...`);
   const session = await ort.InferenceSession.create(buf, {
     executionProviders: ['wasm'],
+    graphOptimizationLevel: 'all',
+    enableCpuMemArena: true,
+    enableMemPattern: true,
   });
   console.log(`[Models] ✅ ${name} loaded (WASM)`);
+  return session;
+}
+
+/**
+ * Try WebGPU first, fall back to WASM if it fails.
+ */
+export async function loadSessionPreferGPU(name, onProgress) {
+  const buf = await loadModelBytes(name, onProgress);
+
+  if (navigator.gpu) {
+    try {
+      console.log(`[Models] ${name}: trying WebGPU...`);
+      const session = await ort.InferenceSession.create(buf, {
+        executionProviders: ['webgpu'],
+        preferredOutputLocation: 'cpu',
+        graphOptimizationLevel: 'all',
+        enableCpuMemArena: true,
+        enableMemPattern: true,
+      });
+      console.log(`[Models] ✅ ${name} loaded (WebGPU)`);
+      return session;
+    } catch (e) {
+      console.warn(`[Models] ${name}: WebGPU failed (${e.message}), falling back to WASM`);
+    }
+  }
+
+  console.log(`[Models] ${name}: creating WASM session...`);
+  const session = await ort.InferenceSession.create(buf, {
+    executionProviders: ['wasm'],
+    graphOptimizationLevel: 'all',
+    enableCpuMemArena: true,
+    enableMemPattern: true,
+  });
+  console.log(`[Models] ✅ ${name} loaded (WASM fallback)`);
   return session;
 }
 
