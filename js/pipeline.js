@@ -10,6 +10,12 @@ import {
   warpAffine, warpAffineMask, nms, vecNormalize, vecMatMul,
 } from './math.js?v=15';
 
+// Run options shared by all session.run() calls — set logSeverityLevel to 3 (error only)
+// to suppress ORT WASM shape-mismatch warnings (VerifyOutputSizes) at inference time.
+// Without this, ORT defaults logSeverityLevel to 2 (warning) per run() call, regardless
+// of what was set during session creation.
+const RUN_OPTIONS = { logSeverityLevel: 3 };
+
 // ── Constants ──────────────────────────────────────────────────────
 
 const ARCFACE_DST_112 = [
@@ -101,7 +107,7 @@ export async function detectFaces(session, imgData) {
   const feeds = {};
   feeds[session.inputNames[0]] = inputTensor;
 
-  const results = await session.run(feeds);
+  const results = await session.run(feeds, RUN_OPTIONS);
   const outputNames = session.outputNames;
 
   const numScales = DET_STRIDES.length;
@@ -198,7 +204,7 @@ export async function extractEmbedding(session, alignedRGBA) {
   const feeds = {};
   feeds[session.inputNames[0]] = inputTensor;
 
-  const results = await session.run(feeds);
+  const results = await session.run(feeds, RUN_OPTIONS);
   const outTensor = results[session.outputNames[0]];
   const rawData = outTensor.getData ? await outTensor.getData() : outTensor.data;
   const embedding = new Float32Array(rawData);
@@ -222,7 +228,7 @@ export async function runSwap(session, alignedRGBA, sourceLatent) {
   const sourceTensor = new ort.Tensor('float32', new Float32Array(sourceLatent), [1, 512]);
   const feeds = { 'target': targetTensor, 'source': sourceTensor };
 
-  const results = await session.run(feeds);
+  const results = await session.run(feeds, RUN_OPTIONS);
   const outTensor = results[session.outputNames[0]];
   const outData = outTensor.getData ? await outTensor.getData() : outTensor.data;
 
@@ -361,7 +367,7 @@ export async function parseFace(session, cropRGBA, cropW, cropH) {
   const feeds = {};
   feeds[session.inputNames[0]] = inputTensor;
 
-  const results = await session.run(feeds);
+  const results = await session.run(feeds, RUN_OPTIONS);
   const outTensor = results[session.outputNames[0]];
   const logits = outTensor.getData ? await outTensor.getData() : outTensor.data;
 

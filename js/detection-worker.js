@@ -18,14 +18,11 @@ ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/di
 ort.env.wasm.numThreads = 1;  // Worker is already a separate thread
 ort.env.logLevel = 'error';
 
-// Suppress ORT WASM shape-mismatch warnings (det_10g exported for 640x640, we run 192x192)
-const _origWarn = console.warn;
-console.warn = function(...args) {
-  if (typeof args[0] === 'string' && args[0].includes('VerifyOutputSizes')) return;
-  _origWarn.apply(console, args);
-};
-
 // ── Detection Constants ──────────────────────────────────────────
+
+// Run options — suppress ORT WASM VerifyOutputSizes warnings at inference time.
+// ORT defaults logSeverityLevel to 2 (warning) per run() call regardless of session options.
+const RUN_OPTIONS = { logSeverityLevel: 3 };
 
 const DET_INPUT_SIZE = 192;
 const DET_STRIDES = [8, 16, 32];
@@ -128,7 +125,7 @@ async function detectFaces(pixels, width, height) {
   const feeds = {};
   feeds[session.inputNames[0]] = inputTensor;
 
-  const results = await session.run(feeds);
+  const results = await session.run(feeds, RUN_OPTIONS);
   const outputNames = session.outputNames;
 
   const numScales = DET_STRIDES.length;

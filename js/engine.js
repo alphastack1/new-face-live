@@ -217,7 +217,7 @@ export class Engine {
     try {
       const swapImg = new ort.Tensor('float32', new Float32Array(1 * 3 * 128 * 128), [1, 3, 128, 128]);
       const swapSrc = new ort.Tensor('float32', new Float32Array(512), [1, 512]);
-      await this.swapSession.run({ 'target': swapImg, 'source': swapSrc });
+      await this.swapSession.run({ 'target': swapImg, 'source': swapSrc }, { logSeverityLevel: 3 });
       console.log('[Engine] Warmup complete');
     } catch (e) {
       console.warn('[Engine] Warmup error (non-fatal):', e.message);
