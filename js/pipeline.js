@@ -6,7 +6,7 @@
 import {
   estimateSimilarityTransform, invertAffine, affinePoint,
   warpAffine, warpAffineMask, nms, vecNormalize, vecMatMul,
-} from './math.js?v=8';
+} from './math.js?v=9';
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -200,13 +200,6 @@ export async function detectOneFace(session, imgData) {
 export function alignFace(srcData, srcW, srcH, kps, outSize) {
   const dst = outSize === 128 ? ARCFACE_DST_128 : ARCFACE_DST_112;
   const M = estimateSimilarityTransform(kps, dst);
-  if (!alignFace[`_logged${outSize}`]) {
-    alignFace[`_logged${outSize}`] = true;
-    console.log(`[Align ${outSize}] srcSize: ${srcW}x${srcH}`);
-    console.log(`[Align ${outSize}] kps:`, kps.map(p => `(${p[0].toFixed(1)},${p[1].toFixed(1)})`).join(' '));
-    console.log(`[Align ${outSize}] dst:`, dst.map(p => `(${p[0].toFixed(1)},${p[1].toFixed(1)})`).join(' '));
-    console.log(`[Align ${outSize}] M:`, JSON.stringify(M.map(r => r.map(v => v.toFixed(4)))));
-  }
   const data = warpAffine(srcData, srcW, srcH, M, outSize, outSize);
   return { data, M };
 }
@@ -275,42 +268,6 @@ export async function runSwap(session, alignedRGBA, sourceLatent) {
 
   // Use named feeds (safer than positional — input order may vary)
   const feeds = { 'target': targetTensor, 'source': sourceTensor };
-
-  // One-time fixed-input test to compare WebGPU vs Python CPU
-  if (!runSwap._fixedTestDone) {
-    runSwap._fixedTestDone = true;
-    console.log('[FIXED TEST] Running with known inputs...');
-    const fixedImg = new Float32Array(1 * 3 * planeSize);
-    fixedImg.fill(0.5); // uniform grey
-    const fixedLat = new Float32Array(512);
-    // Simple known pattern: [0.044, 0.044, 0.044, ...]  (≈ normalized 512-dim)
-    for (let i = 0; i < 512; i++) fixedLat[i] = 1.0 / Math.sqrt(512);
-    const fixedTarget = new ort.Tensor('float32', fixedImg, [1, 3, size, size]);
-    const fixedSource = new ort.Tensor('float32', fixedLat, [1, 512]);
-    const fixedResults = await session.run({ 'target': fixedTarget, 'source': fixedSource });
-    const fixedOut = fixedResults[session.outputNames[0]];
-    const fixedData = fixedOut.getData ? await fixedOut.getData() : fixedOut.data;
-    // Log first 20 values of each channel
-    const r20 = Array.from(fixedData.slice(0, 20)).map(v => v.toFixed(4));
-    const g20 = Array.from(fixedData.slice(planeSize, planeSize + 20)).map(v => v.toFixed(4));
-    const b20 = Array.from(fixedData.slice(planeSize * 2, planeSize * 2 + 20)).map(v => v.toFixed(4));
-    console.log('[FIXED TEST] R[0:20]:', r20.join(', '));
-    console.log('[FIXED TEST] G[0:20]:', g20.join(', '));
-    console.log('[FIXED TEST] B[0:20]:', b20.join(', '));
-
-    // Also test with ZERO latent to see if model uses it at all
-    const zeroLat = new Float32Array(512); // all zeros
-    const zeroSource = new ort.Tensor('float32', zeroLat, [1, 512]);
-    const zeroResults = await session.run({ 'target': fixedTarget, 'source': zeroSource });
-    const zeroOut = zeroResults[session.outputNames[0]];
-    const zeroData = zeroOut.getData ? await zeroOut.getData() : zeroOut.data;
-    const zr20 = Array.from(zeroData.slice(0, 20)).map(v => v.toFixed(4));
-    console.log('[FIXED TEST] Zero-latent R[0:20]:', zr20.join(', '));
-    // Check if latent matters
-    let latentDiff = 0;
-    for (let i = 0; i < fixedData.length; i++) latentDiff += Math.abs(fixedData[i] - zeroData[i]);
-    console.log('[FIXED TEST] Latent impact (total abs diff):', latentDiff.toFixed(4));
-  }
 
   const results = await session.run(feeds);
   const outTensor = results[session.outputNames[0]];

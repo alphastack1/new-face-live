@@ -3,12 +3,12 @@
  * Manages model loading, camera, frame processing loop.
  */
 
-import { loadSession, loadSessionWasm, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=8';
+import { loadSession, loadSessionWasm, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=9';
 import {
   detectOneFace, alignFace, extractEmbedding, projectEmbedding,
   runSwap, pasteBack, parseFullFrame, createRegionMask,
   blendRegion, sharpen,
-} from './pipeline.js?v=8';
+} from './pipeline.js?v=9';
 
 export class Engine {
   constructor() {
@@ -161,8 +161,6 @@ export class Engine {
     // 1. Detect face in frame
     const face = await detectOneFace(this.detSession, frameData);
     if (!face) return null;
-    console.log(`[Frame] detect ${Math.round(performance.now() - t0)}ms`);
-    await yieldToUI();
 
     // 2. Align target face to 128×128 for swapper
     const { data: aligned128, M } = alignFace(
@@ -171,32 +169,6 @@ export class Engine {
 
     // 3. Run face swap
     const swappedFace = await runSwap(this.swapSession, aligned128, this.sourceLatent);
-    console.log(`[Frame] swap ${Math.round(performance.now() - t0)}ms`);
-
-    // Debug: show raw 128x128 input & output side by side
-    if (!this._debugCanvasCreated) {
-      this._debugCanvasCreated = true;
-      const dc = document.createElement('canvas');
-      dc.id = 'debugSwap';
-      dc.width = 256; dc.height = 128;
-      dc.style.cssText = 'position:fixed;top:10px;right:10px;z-index:9999;border:2px solid red;background:#000;';
-      document.body.appendChild(dc);
-      const label = document.createElement('div');
-      label.style.cssText = 'position:fixed;top:142px;right:10px;z-index:9999;color:red;font:12px monospace;background:#000;padding:2px;';
-      label.textContent = 'LEFT=input  RIGHT=swap output';
-      document.body.appendChild(label);
-    }
-    const dc = document.getElementById('debugSwap');
-    if (dc) {
-      const ctx = dc.getContext('2d');
-      // Draw aligned input (left)
-      const inImg = new ImageData(new Uint8ClampedArray(aligned128), 128, 128);
-      ctx.putImageData(inImg, 0, 0);
-      // Draw swap output (right)
-      const outImg = new ImageData(new Uint8ClampedArray(swappedFace), 128, 128);
-      ctx.putImageData(outImg, 128, 0);
-    }
-
     await yieldToUI();
 
     // 4. Paste swapped face back into frame
@@ -210,12 +182,9 @@ export class Engine {
       // Run parsing infrequently (every 15 frames or when bbox moves)
       const needsParsing = this._shouldReparse(face.bbox);
       if (needsParsing) {
-        await yieldToUI();
         const parsed = await parseFullFrame(this.parseSession, frameData, face.bbox);
         this._cachedParsing = parsed;
         this._cachedParsingBox = [...face.bbox];
-        console.log(`[Frame] parse ${Math.round(performance.now() - t0)}ms`);
-        await yieldToUI();
       }
 
       if (this._cachedParsing) {
@@ -242,7 +211,6 @@ export class Engine {
       this.fps = Math.round((this._frameTimestamps.length - 1) / (span / 1000));
     }
 
-    console.log(`[Frame] total ${Math.round(performance.now() - t0)}ms`);
     return new ImageData(result, W, H);
   }
 
