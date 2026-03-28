@@ -143,6 +143,7 @@ export async function loadSession(name, onProgress) {
   console.log(`[Models] ${name}: creating WebGPU session...`);
   const session = await ort.InferenceSession.create(buf, {
     executionProviders: ['webgpu'],
+    preferredOutputLocation: 'cpu',  // Ensure outputs are copied back from GPU
   });
   console.log(`[Models] ✅ ${name} loaded (WebGPU)`);
   return session;

@@ -3,12 +3,12 @@
  * Manages model loading, camera, frame processing loop.
  */
 
-import { loadSession, loadSessionWasm, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=7';
+import { loadSession, loadSessionWasm, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=8';
 import {
   detectOneFace, alignFace, extractEmbedding, projectEmbedding,
   runSwap, pasteBack, parseFullFrame, createRegionMask,
   blendRegion, sharpen,
-} from './pipeline.js?v=7';
+} from './pipeline.js?v=8';
 
 export class Engine {
   constructor() {
@@ -77,9 +77,8 @@ export class Engine {
     console.log('[Engine] Loading w600k_r50 (WASM)...');
     this.recSession = await loadSessionWasm('w600k_r50', progress);
 
-    // TEMP: Test with WASM to verify if WebGPU computes wrong results
-    console.log('[Engine] Loading inswapper (WASM - diagnostic test)...');
-    this.swapSession = await loadSessionWasm('inswapper', progress);
+    console.log('[Engine] Loading inswapper (WebGPU)...');
+    this.swapSession = await loadSession('inswapper', progress);
 
     console.log('[Engine] Loading bisenet (WebGPU)...');
     this.parseSession = await loadSession('bisenet', progress);

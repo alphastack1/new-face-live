@@ -6,7 +6,7 @@
 import {
   estimateSimilarityTransform, invertAffine, affinePoint,
   warpAffine, warpAffineMask, nms, vecNormalize, vecMatMul,
-} from './math.js?v=7';
+} from './math.js?v=8';
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -230,7 +230,9 @@ export async function extractEmbedding(session, alignedRGBA) {
   feeds[session.inputNames[0]] = inputTensor;
 
   const results = await session.run(feeds);
-  const embedding = new Float32Array(results[session.outputNames[0]].data);
+  const outTensor = results[session.outputNames[0]];
+  const rawData = outTensor.getData ? await outTensor.getData() : outTensor.data;
+  const embedding = new Float32Array(rawData);
 
   // L2 normalize
   vecNormalize(embedding);
@@ -268,7 +270,11 @@ export async function runSwap(session, alignedRGBA, sourceLatent) {
   const feeds = { 'target': targetTensor, 'source': sourceTensor };
 
   const results = await session.run(feeds);
-  const outData = results[session.outputNames[0]].data;
+
+  // CRITICAL: For WebGPU sessions, .data may not sync from GPU.
+  // Use .getData() which properly downloads GPU → CPU.
+  const outTensor = results[session.outputNames[0]];
+  const outData = outTensor.getData ? await outTensor.getData() : outTensor.data;
 
   // Debug: check model output
   const inSample = [imgTensor[0], imgTensor[1], imgTensor[2], imgTensor[planeSize], imgTensor[planeSize+1]];
@@ -441,7 +447,8 @@ export async function parseFace(session, cropRGBA, cropW, cropH) {
   feeds[session.inputNames[0]] = inputTensor;
 
   const results = await session.run(feeds);
-  const logits = results[session.outputNames[0]].data; // (1, 19, 512, 512)
+  const outTensor = results[session.outputNames[0]];
+  const logits = outTensor.getData ? await outTensor.getData() : outTensor.data; // (1, 19, 512, 512)
 
   // Argmax over class dimension → (512, 512) class labels
   const labels512 = new Uint8Array(planeSize);
