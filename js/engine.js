@@ -3,12 +3,12 @@
  * Manages model loading, camera, frame processing loop.
  */
 
-import { loadSession, loadSessionWasm, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=9';
+import { loadSession, loadSessionWasm, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=10';
 import {
   detectOneFace, alignFace, extractEmbedding, projectEmbedding,
   runSwap, pasteBack, parseFullFrame, createRegionMask,
   blendRegion, sharpen,
-} from './pipeline.js?v=9';
+} from './pipeline.js?v=10';
 
 export class Engine {
   constructor() {
@@ -35,6 +35,11 @@ export class Engine {
     this._cachedParsing = null;
     this._cachedParsingBox = null;
     this._parseFrameCount = 0;
+
+    // Cached detection (skip detect on intermediate frames)
+    this._cachedFace = null;
+    this._detectFrameCount = 0;
+    this._detectEveryN = 3;  // Run detection every Nth frame, reuse kps otherwise
 
     // Performance
     this.fps = 0;
@@ -101,44 +106,49 @@ export class Engine {
    */
   async setReference(source) {
     if (!this.ready) return false;
+    this._settingReference = true;
 
-    // Get image data
-    let img = source;
-    if (typeof source === 'string') {
-      img = new Image();
-      img.crossOrigin = 'anonymous';
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-        img.src = source;
-      });
+    try {
+      // Get image data
+      let img = source;
+      if (typeof source === 'string') {
+        img = new Image();
+        img.crossOrigin = 'anonymous';
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+          img.src = source;
+        });
+      }
+
+      const canvas = new OffscreenCanvas(img.naturalWidth || img.width, img.naturalHeight || img.height);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+      // Detect face
+      const face = await detectOneFace(this.detSession, imgData);
+      if (!face) {
+        console.warn('[Engine] No face detected in reference image');
+        return false;
+      }
+
+      // Align to 112×112 for embedding
+      const { data: alignedRGBA } = alignFace(
+        imgData.data, imgData.width, imgData.height, face.kps, 112
+      );
+
+      // Extract embedding
+      this.sourceEmbedding = await extractEmbedding(this.recSession, alignedRGBA);
+
+      // Project through emap
+      this.sourceLatent = projectEmbedding(this.sourceEmbedding, this.emap);
+
+      console.log('[Engine] Reference face set');
+      return true;
+    } finally {
+      this._settingReference = false;
     }
-
-    const canvas = new OffscreenCanvas(img.naturalWidth || img.width, img.naturalHeight || img.height);
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
-    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-    // Detect face
-    const face = await detectOneFace(this.detSession, imgData);
-    if (!face) {
-      console.warn('[Engine] No face detected in reference image');
-      return false;
-    }
-
-    // Align to 112×112 for embedding
-    const { data: alignedRGBA } = alignFace(
-      imgData.data, imgData.width, imgData.height, face.kps, 112
-    );
-
-    // Extract embedding
-    this.sourceEmbedding = await extractEmbedding(this.recSession, alignedRGBA);
-
-    // Project through emap
-    this.sourceLatent = projectEmbedding(this.sourceEmbedding, this.emap);
-
-    console.log('[Engine] Reference face set');
-    return true;
   }
 
   // ── Frame Processing ───────────────────────────────────────────
@@ -150,17 +160,23 @@ export class Engine {
    * @returns {Promise<ImageData|null>} Processed frame, or null if no face / no ref
    */
   async processFrame(frameData) {
-    if (!this.ready || !this.sourceLatent) return null;
+    if (!this.ready || !this.sourceLatent || this._settingReference) return null;
 
-    const t0 = performance.now();
     const { width: W, height: H } = frameData;
 
-    // Yield helper — lets RAF callbacks fire so the video stays live
-    const yieldToUI = () => new Promise(r => setTimeout(r, 0));
-
-    // 1. Detect face in frame
-    const face = await detectOneFace(this.detSession, frameData);
-    if (!face) return null;
+    // 1. Detect face — skip on intermediate frames and reuse cached face
+    this._detectFrameCount++;
+    let face;
+    if (this._cachedFace && (this._detectFrameCount % this._detectEveryN !== 0)) {
+      face = this._cachedFace;
+    } else {
+      face = await detectOneFace(this.detSession, frameData);
+      if (!face) {
+        this._cachedFace = null;
+        return null;
+      }
+      this._cachedFace = face;
+    }
 
     // 2. Align target face to 128×128 for swapper
     const { data: aligned128, M } = alignFace(
@@ -169,7 +185,6 @@ export class Engine {
 
     // 3. Run face swap
     const swappedFace = await runSwap(this.swapSession, aligned128, this.sourceLatent);
-    await yieldToUI();
 
     // 4. Paste swapped face back into frame
     const fullSwapped = pasteBack(frameData.data, W, H, swappedFace, M);

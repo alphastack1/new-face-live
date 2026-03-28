@@ -253,7 +253,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);heigh
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.webgpu.js"></script>
 
 <script type="module">
-import { Engine } from './js/engine.js?v=9';
+import { Engine } from './js/engine.js?v=10';
 
 // ── Reference images registry ────────────────────────────────────
 const REFS = {
@@ -438,13 +438,8 @@ async function processLoop() {
     drawVideoFrame();
     const frameData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-    const t0 = performance.now();
-    console.log('[Loop] Starting frame processing...');
-
     // Run inference async — don't block the render loop
     engine.processFrame(frameData).then(result => {
-      const ms = Math.round(performance.now() - t0);
-      console.log(`[Loop] Frame done in ${ms}ms, result: ${result ? 'yes' : 'null'}`);
       if (result) {
         lastResult = result;
       }
