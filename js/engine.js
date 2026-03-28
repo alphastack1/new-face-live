@@ -3,12 +3,12 @@
  * Manages model loading, camera, frame processing loop.
  */
 
-import { loadSession, loadSessionWasm, loadSessionPreferGPU, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=11';
+import { loadSession, loadSessionWasm, loadSessionPreferGPU, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=12';
 import {
   detectOneFace, alignFace, extractEmbedding, projectEmbedding,
   runSwap, pasteBack, parseFullFrame, createRegionMask,
   blendRegion, sharpen,
-} from './pipeline.js?v=11';
+} from './pipeline.js?v=12';
 
 export class Engine {
   constructor() {
@@ -123,7 +123,16 @@ export class Engine {
    */
   async setReference(source) {
     if (!this.ready) return false;
+
+    // Cancel any in-progress reference setting
+    this._refVersion = (this._refVersion || 0) + 1;
+    const myVersion = this._refVersion;
+
+    // Signal processFrame to stop and wait for current frame to finish
     this._settingReference = true;
+    if (this._frameInProgress) {
+      await this._frameInProgress;
+    }
 
     try {
       // Get image data
@@ -138,6 +147,9 @@ export class Engine {
         });
       }
 
+      // Bail if another setReference was called while we loaded the image
+      if (this._refVersion !== myVersion) return false;
+
       const canvas = new OffscreenCanvas(img.naturalWidth || img.width, img.naturalHeight || img.height);
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0);
@@ -149,6 +161,7 @@ export class Engine {
         console.warn('[Engine] No face detected in reference image');
         return false;
       }
+      if (this._refVersion !== myVersion) return false;
 
       // Align to 112×112 for embedding
       const { data: alignedRGBA } = alignFace(
@@ -157,14 +170,23 @@ export class Engine {
 
       // Extract embedding
       this.sourceEmbedding = await extractEmbedding(this.recSession, alignedRGBA);
+      if (this._refVersion !== myVersion) return false;
 
       // Project through emap
       this.sourceLatent = projectEmbedding(this.sourceEmbedding, this.emap);
 
+      // Clear cached face so detection runs fresh with new reference
+      this._cachedFace = null;
+      this._cachedParsing = null;
+      this._detectFrameCount = 0;
+
       console.log('[Engine] Reference face set');
       return true;
     } finally {
-      this._settingReference = false;
+      // Only clear the flag if we're still the active setReference call
+      if (this._refVersion === myVersion) {
+        this._settingReference = false;
+      }
     }
   }
 
@@ -179,6 +201,16 @@ export class Engine {
   async processFrame(frameData) {
     if (!this.ready || !this.sourceLatent || this._settingReference) return null;
 
+    const promise = this._processFrameInner(frameData);
+    this._frameInProgress = promise;
+    try {
+      return await promise;
+    } finally {
+      if (this._frameInProgress === promise) this._frameInProgress = null;
+    }
+  }
+
+  async _processFrameInner(frameData) {
     const { width: W, height: H } = frameData;
 
     // 1. Detect face — skip on intermediate frames and reuse cached face
