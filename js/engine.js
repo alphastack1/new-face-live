@@ -3,12 +3,12 @@
  * Manages model loading, camera, frame processing loop.
  */
 
-import { loadSession, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=6';
+import { loadSession, loadSessionWasm, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=7';
 import {
   detectOneFace, alignFace, extractEmbedding, projectEmbedding,
   runSwap, pasteBack, parseFullFrame, createRegionMask,
   blendRegion, sharpen,
-} from './pipeline.js?v=6';
+} from './pipeline.js?v=7';
 
 export class Engine {
   constructor() {
@@ -67,16 +67,20 @@ export class Engine {
     };
 
     // Load models (sequentially to avoid memory pressure)
-    console.log('[Engine] Loading det_10g...');
-    this.detSession = await loadSession('det_10g', progress);
+    // det_10g: WASM — WebGPU lacks AveragePool ceil_mode support
+    // w600k_r50: WASM — has ops WebGPU can't create session for (runs once, no perf impact)
+    // inswapper: WebGPU REQUIRED — runs every frame, 20s on WASM vs <100ms on GPU
+    // bisenet: WebGPU — runs every 15 frames for face parsing
+    console.log('[Engine] Loading det_10g (WASM)...');
+    this.detSession = await loadSessionWasm('det_10g', progress);
 
-    console.log('[Engine] Loading w600k_r50...');
-    this.recSession = await loadSession('w600k_r50', progress);
+    console.log('[Engine] Loading w600k_r50 (WASM)...');
+    this.recSession = await loadSessionWasm('w600k_r50', progress);
 
-    console.log('[Engine] Loading inswapper...');
+    console.log('[Engine] Loading inswapper (WebGPU)...');
     this.swapSession = await loadSession('inswapper', progress);
 
-    console.log('[Engine] Loading bisenet...');
+    console.log('[Engine] Loading bisenet (WebGPU)...');
     this.parseSession = await loadSession('bisenet', progress);
 
     console.log('[Engine] Loading emap...');

@@ -149,6 +149,19 @@ export async function loadSession(name, onProgress) {
 }
 
 /**
+ * Load a model with WASM backend (for models with WebGPU-unsupported ops).
+ */
+export async function loadSessionWasm(name, onProgress) {
+  const buf = await loadModelBytes(name, onProgress);
+  console.log(`[Models] ${name}: creating WASM session...`);
+  const session = await ort.InferenceSession.create(buf, {
+    executionProviders: ['wasm'],
+  });
+  console.log(`[Models] ✅ ${name} loaded (WASM)`);
+  return session;
+}
+
+/**
  * Load the emap matrix (512x512 float32).
  * @param {function} onProgress
  * @returns {Promise<Float32Array>}
