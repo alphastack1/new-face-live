@@ -8,7 +8,7 @@
 import {
   estimateSimilarityTransform, invertAffine, affinePoint,
   warpAffine, warpAffineMask, nms, vecNormalize, vecMatMul,
-} from './math.js?v=14';
+} from './math.js?v=15';
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -391,6 +391,9 @@ export async function parseFullFrame(session, frameData, bbox) {
   const x2 = Math.min(W, Math.round(bbox[2]) + px);
   const y2 = Math.min(H, Math.round(bbox[3]) + py);
   const cropW = x2 - x1, cropH = y2 - y1;
+
+  // Guard against degenerate bounding boxes
+  if (cropW < 2 || cropH < 2) return null;
 
   const cropRGBA = new Uint8ClampedArray(cropW * cropH * 4);
   for (let row = 0; row < cropH; row++) {
