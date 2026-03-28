@@ -425,12 +425,11 @@ function drawVideoFrame() {
 async function processLoop() {
   if (!camRunning) return;
 
-  // Always draw the live video so it never freezes
-  drawVideoFrame();
-
-  // Overlay last swap result if available
+  // Draw last swap result, or raw video if no result yet
   if (lastResult) {
     ctx.putImageData(lastResult, 0, 0);
+  } else {
+    drawVideoFrame();
   }
 
   // Start inference if not already running and we have a reference

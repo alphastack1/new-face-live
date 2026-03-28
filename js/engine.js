@@ -123,8 +123,10 @@ export class Engine {
             this._workerCallbacks.delete(e.data.id);
             cb(e.data.face);
           } else {
-            // Frame detection — store as latest result
-            this._latestDetection = e.data.face;
+            // Frame detection — only update if face found (prevents flicker)
+            if (e.data.face) {
+              this._latestDetection = e.data.face;
+            }
           }
         }
         else if (type === 'error') {
