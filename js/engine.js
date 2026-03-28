@@ -173,37 +173,6 @@ export class Engine {
     const swappedFace = await runSwap(this.swapSession, aligned128, this.sourceLatent);
     console.log(`[Frame] swap ${Math.round(performance.now() - t0)}ms`);
 
-    // One-time WASM comparison test
-    if (!this._wasmTestDone) {
-      this._wasmTestDone = true;
-      console.log('[DEBUG] Running WASM comparison test...');
-      try {
-        const wasmSession = await ort.InferenceSession.create(
-          await (await fetch('/models-cdn/inswapper_128.onnx')).arrayBuffer(),
-          { executionProviders: ['wasm'] }
-        );
-        const wasmResult = await runSwap(wasmSession, aligned128, this.sourceLatent);
-        // Compare first 20 pixels
-        let gpuSample = [], wasmSample = [];
-        for (let i = 0; i < 80; i += 4) {
-          gpuSample.push(swappedFace[i]);
-          wasmSample.push(wasmResult[i]);
-        }
-        console.log('[DEBUG] WebGPU output (R of first 20px):', gpuSample);
-        console.log('[DEBUG] WASM output (R of first 20px):', wasmSample);
-        // Overall diff
-        let maxDiff = 0, totalDiff = 0;
-        for (let i = 0; i < swappedFace.length; i++) {
-          const d = Math.abs(swappedFace[i] - wasmResult[i]);
-          if (d > maxDiff) maxDiff = d;
-          totalDiff += d;
-        }
-        console.log(`[DEBUG] Max pixel diff: ${maxDiff}, avg diff: ${(totalDiff / swappedFace.length).toFixed(3)}`);
-      } catch (e) {
-        console.warn('[DEBUG] WASM comparison failed:', e.message);
-      }
-    }
-
     await yieldToUI();
 
     // 4. Paste swapped face back into frame
