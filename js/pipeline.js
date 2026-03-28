@@ -140,20 +140,20 @@ export async function detectFaces(session, imgData) {
           const score = scoresData[idx];
           if (score < DET_SCORE_THRESH) continue;
 
-          // Decode bbox: distance from anchor to edges
+          // Decode bbox: distance from anchor to edges (SCRFD: multiply by stride)
           const bi = idx * 4;
-          const x1 = (cx - bboxData[bi])     / scale;
-          const y1 = (cy - bboxData[bi + 1]) / scale;
-          const x2 = (cx + bboxData[bi + 2]) / scale;
-          const y2 = (cy + bboxData[bi + 3]) / scale;
+          const x1 = (cx - bboxData[bi]     * stride) / scale;
+          const y1 = (cy - bboxData[bi + 1] * stride) / scale;
+          const x2 = (cx + bboxData[bi + 2] * stride) / scale;
+          const y2 = (cy + bboxData[bi + 3] * stride) / scale;
 
-          // Decode keypoints
+          // Decode keypoints (SCRFD: kps = kps_pred * stride + anchor_center)
           const ki = idx * 10;
           const kps = [];
           for (let k = 0; k < 5; k++) {
             kps.push([
-              (cx + kpsData[ki + k * 2])     / scale,
-              (cy + kpsData[ki + k * 2 + 1]) / scale,
+              (cx + kpsData[ki + k * 2]     * stride) / scale,
+              (cy + kpsData[ki + k * 2 + 1] * stride) / scale,
             ]);
           }
 
