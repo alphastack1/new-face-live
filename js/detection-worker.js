@@ -18,6 +18,13 @@ ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/di
 ort.env.wasm.numThreads = 1;  // Worker is already a separate thread
 ort.env.logLevel = 'error';
 
+// Suppress ORT WASM shape-mismatch warnings (det_10g exported for 640x640, we run 192x192)
+const _origWarn = console.warn;
+console.warn = function(...args) {
+  if (typeof args[0] === 'string' && args[0].includes('VerifyOutputSizes')) return;
+  _origWarn.apply(console, args);
+};
+
 // ── Detection Constants ──────────────────────────────────────────
 
 const DET_INPUT_SIZE = 192;

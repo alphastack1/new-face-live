@@ -387,8 +387,9 @@ export class Engine {
         );
         result = blendRegion(frameData.data, fullSwapped, mask, this.opacity, W, H, this._blendBuf);
       } else {
-        // No parsing data yet — show raw frame rather than full-face swap
-        return null;
+        // Parsing unavailable (first frame or bisenet failed) — use full-face
+        // as temporary fallback rather than hiding the swap entirely
+        result = blendRegion(frameData.data, fullSwapped, null, this.opacity, W, H, this._blendBuf);
       }
     }
 
@@ -417,7 +418,8 @@ export class Engine {
 
   _shouldReparse(bbox) {
     this._parseFrameCount++;
-    if (this._parseFrameCount % 30 !== 0) return false;
+    // Reparse every 45 frames (~1.5-3s) — not too often, keeps mask stable
+    if (this._parseFrameCount % 45 !== 0) return false;
     if (!this._cachedParsingBox) return true;
 
     const [x1, y1, x2, y2] = bbox;
@@ -425,7 +427,8 @@ export class Engine {
     const shift = Math.abs(x1 - ox1) + Math.abs(y1 - oy1) + Math.abs(x2 - ox2) + Math.abs(y2 - oy2);
     const size = (x2 - x1 + y2 - y1);
     if (size <= 0) return true;  // Guard against degenerate bbox
-    return shift / size > 0.15;
+    // Higher threshold = more stable mask during head movement
+    return shift / size > 0.25;
   }
 
   // ── Process Single Image (for preview) ─────────────────────────
