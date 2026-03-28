@@ -72,12 +72,12 @@ export class Engine {
     };
 
     // Load models (sequentially to avoid memory pressure)
-    // det_10g: Try WebGPU first, fall back to WASM
+    // det_10g: WASM — WebGPU AveragePool shape computation uses ceil() internally (ORT bug)
     // w600k_r50: WASM — has ops WebGPU can't create session for (runs once, no perf impact)
     // inswapper: WebGPU REQUIRED — runs every frame, 20s on WASM vs <100ms on GPU
     // bisenet: WebGPU — runs every 15 frames for face parsing
-    console.log('[Engine] Loading det_10g...');
-    this.detSession = await loadSessionPreferGPU('det_10g', progress);
+    console.log('[Engine] Loading det_10g (WASM)...');
+    this.detSession = await loadSessionWasm('det_10g', progress);
 
     console.log('[Engine] Loading w600k_r50 (WASM)...');
     this.recSession = await loadSessionWasm('w600k_r50', progress);
@@ -101,15 +101,11 @@ export class Engine {
 
   async _warmup() {
     try {
-      // Warm det_10g (192×192 input)
-      const detInput = new ort.Tensor('float32', new Float32Array(1 * 3 * 192 * 192), [1, 3, 192, 192]);
-      await this.detSession.run({ [this.detSession.inputNames[0]]: detInput });
-
-      // Warm inswapper (128×128 + 512 latent)
+      // Warm WebGPU sessions to trigger shader compilation
+      // (WASM sessions don't need warmup)
       const swapImg = new ort.Tensor('float32', new Float32Array(1 * 3 * 128 * 128), [1, 3, 128, 128]);
       const swapSrc = new ort.Tensor('float32', new Float32Array(512), [1, 512]);
       await this.swapSession.run({ 'target': swapImg, 'source': swapSrc });
-
       console.log('[Engine] Warmup complete');
     } catch (e) {
       console.warn('[Engine] Warmup error (non-fatal):', e.message);
