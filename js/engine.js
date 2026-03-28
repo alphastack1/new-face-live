@@ -4,12 +4,12 @@
  * with the WebGPU swap on the main thread.
  */
 
-import { loadSession, loadSessionWasm, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=13';
+import { loadSession, loadSessionWasm, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=14';
 import {
   detectOneFace, alignFace, extractEmbedding, projectEmbedding,
   runSwap, pasteBack, parseFullFrame, createRegionMask,
   blendRegion, sharpen,
-} from './pipeline.js?v=13';
+} from './pipeline.js?v=14';
 
 export class Engine {
   constructor() {
@@ -277,21 +277,29 @@ export class Engine {
   }
 
   async _processWithFace(frameData, W, H, face) {
+    const pixelCount = W * H * 4;
+
+    // Ensure reusable frame buffers exist and are the right size
+    if (!this._pasteBuf || this._pasteBuf.length !== pixelCount) {
+      this._pasteBuf = new Uint8ClampedArray(pixelCount);
+      this._blendBuf = new Uint8ClampedArray(pixelCount);
+    }
+
     // 1. Align target face to 128×128 for swapper
     const { data: aligned128, M } = alignFace(
       frameData.data, W, H, face.kps, 128
     );
 
-    // 2. Run face swap (WebGPU — this runs in parallel with worker detection)
+    // 2. Run face swap (WebGPU — runs in parallel with worker detection)
     const swappedFace = await runSwap(this.swapSession, aligned128, this.sourceLatent);
 
-    // 3. Paste swapped face back into frame
-    const fullSwapped = pasteBack(frameData.data, W, H, swappedFace, M);
+    // 3. Paste swapped face back into frame (reuse buffer)
+    const fullSwapped = pasteBack(frameData.data, W, H, swappedFace, M, this._pasteBuf);
 
     // 4. Regional masking
     let result;
     if (this.region === 'full') {
-      result = blendRegion(frameData.data, fullSwapped, null, this.opacity, W, H);
+      result = blendRegion(frameData.data, fullSwapped, null, this.opacity, W, H, this._blendBuf);
     } else {
       const needsParsing = this._shouldReparse(face.bbox);
       if (needsParsing) {
@@ -305,9 +313,9 @@ export class Engine {
         const mask = createRegionMask(
           labels, cropW, cropH, this.region, cropBox, face.kps, W, H
         );
-        result = blendRegion(frameData.data, fullSwapped, mask, this.opacity, W, H);
+        result = blendRegion(frameData.data, fullSwapped, mask, this.opacity, W, H, this._blendBuf);
       } else {
-        result = blendRegion(frameData.data, fullSwapped, null, this.opacity, W, H);
+        result = blendRegion(frameData.data, fullSwapped, null, this.opacity, W, H, this._blendBuf);
       }
     }
 
@@ -329,7 +337,7 @@ export class Engine {
 
   _shouldReparse(bbox) {
     this._parseFrameCount++;
-    if (this._parseFrameCount % 15 !== 0) return false;
+    if (this._parseFrameCount % 30 !== 0) return false;
     if (!this._cachedParsingBox) return true;
 
     const [x1, y1, x2, y2] = bbox;

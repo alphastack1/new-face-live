@@ -1,36 +1,33 @@
 /**
  * ML pipeline: face detection, recognition, swapping, parsing, blending.
  * All inference runs through onnxruntime-web (WebGPU or WASM fallback).
+ *
+ * Performance: hot-path buffers are pre-allocated and reused across frames.
  */
 
 import {
   estimateSimilarityTransform, invertAffine, affinePoint,
   warpAffine, warpAffineMask, nms, vecNormalize, vecMatMul,
-} from './math.js?v=9';
+} from './math.js?v=14';
 
 // ── Constants ──────────────────────────────────────────────────────
 
-// Canonical face landmarks for ArcFace alignment (112×112 space)
 const ARCFACE_DST_112 = [
-  [38.2946, 51.6963],  // left eye
-  [73.5318, 51.5014],  // right eye
-  [56.0252, 71.7366],  // nose tip
-  [41.5493, 92.3655],  // left mouth
-  [70.7299, 92.2041],  // right mouth
+  [38.2946, 51.6963],
+  [73.5318, 51.5014],
+  [56.0252, 71.7366],
+  [41.5493, 92.3655],
+  [70.7299, 92.2041],
 ];
 
-// For 128×128 inswapper input: shift +8px in X only (matches insightface exactly)
-// insightface: ratio=128/128=1, diff_x=8*1=8, dst=arcface_dst*1, dst[:,0]+=8
 const ARCFACE_DST_128 = ARCFACE_DST_112.map(([x, y]) => [x + 8.0, y]);
 
-// Detection model config
 const DET_INPUT_SIZE = 192;
 const DET_STRIDES = [8, 16, 32];
 const DET_NUM_ANCHORS = 2;
 const DET_SCORE_THRESH = 0.5;
 const DET_NMS_THRESH = 0.4;
 
-// BiSeNet parsing classes
 const REGION_CLASSES = {
   nose: [10],
   lips: [11, 12, 13],
@@ -39,29 +36,35 @@ const REGION_CLASSES = {
   chin: [1],
 };
 
-// ── Face Detection (RetinaFace / det_10g) ──────────────────────────
+// ── Pre-allocated Buffers ─────────────────────────────────────────
+// Reused across frames to reduce GC pressure.
 
-/**
- * Preprocess a video frame for face detection.
- * Resizes preserving aspect ratio, pads to square, normalizes.
- *
- * @param {ImageData} imgData - Source frame (RGBA)
- * @returns {{ tensor: Float32Array, scale: number, padW: number, padH: number }}
- */
-// Cached canvases for detection preprocessing (avoid per-frame allocation)
+const SWAP_SIZE = 128;
+const SWAP_PLANE = SWAP_SIZE * SWAP_SIZE;
+
+// runSwap: input tensor + output RGBA
+const _swapTensor = new Float32Array(1 * 3 * SWAP_PLANE);
+const _swapRGBA = new Uint8ClampedArray(SWAP_PLANE * 4);
+
+// Detection preprocessing
 let _detSrcCanvas = null, _detSrcCtx = null;
 let _detResCanvas = null, _detResCtx = null;
+const _detTensor = new Float32Array(1 * 3 * DET_INPUT_SIZE * DET_INPUT_SIZE);
+
+// parseFace: cached canvases
+let _parseSrcCanvas = null, _parseSrcCtx = null;
+let _parseResCanvas = null, _parseResCtx = null;
+
+// ── Face Detection (RetinaFace / det_10g) ──────────────────────────
 
 export function preprocessDetect(imgData) {
-  const { width: W, height: H, data } = imgData;
+  const { width: W, height: H } = imgData;
   const size = DET_INPUT_SIZE;
 
-  // Compute resize (preserve aspect ratio)
   const ratio = Math.min(size / W, size / H);
   const newW = Math.round(W * ratio);
   const newH = Math.round(H * ratio);
 
-  // Resize using cached offscreen canvases
   if (!_detSrcCanvas || _detSrcCanvas.width !== W || _detSrcCanvas.height !== H) {
     _detSrcCanvas = new OffscreenCanvas(W, H);
     _detSrcCtx = _detSrcCanvas.getContext('2d');
@@ -75,45 +78,32 @@ export function preprocessDetect(imgData) {
   _detResCtx.clearRect(0, 0, size, size);
   _detResCtx.drawImage(_detSrcCanvas, 0, 0, W, H, 0, 0, newW, newH);
 
-  const resized = _detResCtx.getImageData(0, 0, size, size);
-  const px = resized.data;
-
-  // Convert RGBA → RGB float32 NCHW, normalize: (px - 127.5) / 128.0
-  const tensor = new Float32Array(1 * 3 * size * size);
+  const px = _detResCtx.getImageData(0, 0, size, size).data;
   const planeSize = size * size;
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const si = (y * size + x) * 4;
       const di = y * size + x;
-      tensor[0 * planeSize + di] = (px[si]     - 127.5) / 128.0;  // R
-      tensor[1 * planeSize + di] = (px[si + 1] - 127.5) / 128.0;  // G
-      tensor[2 * planeSize + di] = (px[si + 2] - 127.5) / 128.0;  // B
+      _detTensor[0 * planeSize + di] = (px[si]     - 127.5) / 128.0;
+      _detTensor[1 * planeSize + di] = (px[si + 1] - 127.5) / 128.0;
+      _detTensor[2 * planeSize + di] = (px[si + 2] - 127.5) / 128.0;
     }
   }
 
-  return { tensor, scale: ratio, newW, newH };
+  return { tensor: _detTensor, scale: ratio, newW, newH };
 }
 
-/**
- * Run face detection and decode outputs.
- * @param {ort.InferenceSession} session
- * @param {ImageData} imgData
- * @returns {Promise<Array<{bbox: number[], kps: number[][], score: number}>>}
- */
 export async function detectFaces(session, imgData) {
   const { tensor, scale } = preprocessDetect(imgData);
 
   const inputTensor = new ort.Tensor('float32', tensor, [1, 3, DET_INPUT_SIZE, DET_INPUT_SIZE]);
   const feeds = {};
-  const inputName = session.inputNames[0];
-  feeds[inputName] = inputTensor;
+  feeds[session.inputNames[0]] = inputTensor;
 
   const results = await session.run(feeds);
   const outputNames = session.outputNames;
 
-  // Decode multi-scale outputs
-  // Output order: [scores_s8, scores_s16, scores_s32, bbox_s8, bbox_s16, bbox_s32, kps_s8, kps_s16, kps_s32]
   const numScales = DET_STRIDES.length;
   const allBoxes = [];
   const allScores = [];
@@ -123,13 +113,11 @@ export async function detectFaces(session, imgData) {
     const stride = DET_STRIDES[si];
     const fmH = Math.floor(DET_INPUT_SIZE / stride);
     const fmW = Math.floor(DET_INPUT_SIZE / stride);
-    const numAnchors = fmH * fmW * DET_NUM_ANCHORS;
 
     const scoresData = results[outputNames[si]].data;
     const bboxData   = results[outputNames[si + numScales]].data;
     const kpsData    = results[outputNames[si + numScales * 2]].data;
 
-    // Generate anchor centers
     for (let row = 0; row < fmH; row++) {
       for (let col = 0; col < fmW; col++) {
         const cx = col * stride;
@@ -140,14 +128,12 @@ export async function detectFaces(session, imgData) {
           const score = scoresData[idx];
           if (score < DET_SCORE_THRESH) continue;
 
-          // Decode bbox: distance from anchor to edges (SCRFD: multiply by stride)
           const bi = idx * 4;
           const x1 = (cx - bboxData[bi]     * stride) / scale;
           const y1 = (cy - bboxData[bi + 1] * stride) / scale;
           const x2 = (cx + bboxData[bi + 2] * stride) / scale;
           const y2 = (cy + bboxData[bi + 3] * stride) / scale;
 
-          // Decode keypoints (SCRFD: kps = kps_pred * stride + anchor_center)
           const ki = idx * 10;
           const kps = [];
           for (let k = 0; k < 5; k++) {
@@ -165,7 +151,6 @@ export async function detectFaces(session, imgData) {
     }
   }
 
-  // NMS
   const keep = nms(allBoxes, allScores, DET_NMS_THRESH);
   return keep.map(i => ({
     bbox: allBoxes[i],
@@ -174,29 +159,15 @@ export async function detectFaces(session, imgData) {
   }));
 }
 
-/**
- * Get the primary face (leftmost / largest).
- */
 export async function detectOneFace(session, imgData) {
   const faces = await detectFaces(session, imgData);
   if (faces.length === 0) return null;
-  // Return face with smallest x1 (leftmost), matching Python behavior
   faces.sort((a, b) => a.bbox[0] - b.bbox[0]);
   return faces[0];
 }
 
 // ── Face Alignment ─────────────────────────────────────────────────
 
-/**
- * Align a face to a canonical position using 5 keypoints.
- *
- * @param {Uint8ClampedArray} srcData - Source RGBA pixels
- * @param {number} srcW
- * @param {number} srcH
- * @param {number[][]} kps - 5 keypoints [[x,y], ...]
- * @param {number} outSize - Output size (112 for recognition, 128 for swap)
- * @returns {{ data: Uint8ClampedArray, M: number[][] }}
- */
 export function alignFace(srcData, srcW, srcH, kps, outSize) {
   const dst = outSize === 128 ? ARCFACE_DST_128 : ARCFACE_DST_112;
   const M = estimateSimilarityTransform(kps, dst);
@@ -206,18 +177,11 @@ export function alignFace(srcData, srcW, srcH, kps, outSize) {
 
 // ── ArcFace Embedding Extraction ───────────────────────────────────
 
-/**
- * Extract a 512-dim face embedding from an aligned 112×112 face.
- * @param {ort.InferenceSession} session - w600k_r50 session
- * @param {Uint8ClampedArray} alignedRGBA - 112×112 RGBA pixels
- * @returns {Promise<Float32Array>} Normalized 512-dim embedding
- */
 export async function extractEmbedding(session, alignedRGBA) {
   const size = 112;
   const planeSize = size * size;
   const tensor = new Float32Array(1 * 3 * planeSize);
 
-  // RGBA → RGB NCHW, normalize: (px - 127.5) / 127.5
   for (let i = 0; i < planeSize; i++) {
     const si = i * 4;
     tensor[0 * planeSize + i] = (alignedRGBA[si]     - 127.5) / 127.5;
@@ -234,64 +198,40 @@ export async function extractEmbedding(session, alignedRGBA) {
   const rawData = outTensor.getData ? await outTensor.getData() : outTensor.data;
   const embedding = new Float32Array(rawData);
 
-  // L2 normalize
   vecNormalize(embedding);
   return embedding;
 }
 
 // ── InSwapper Face Swap ────────────────────────────────────────────
 
-/**
- * Run the inswapper model to generate a swapped face.
- *
- * @param {ort.InferenceSession} session - inswapper session
- * @param {Uint8ClampedArray} alignedRGBA - 128×128 target face RGBA
- * @param {Float32Array} sourceLatent - 512-dim projected+normalized embedding
- * @returns {Promise<Uint8ClampedArray>} 128×128 swapped face RGBA
- */
 export async function runSwap(session, alignedRGBA, sourceLatent) {
-  const size = 128;
-  const planeSize = size * size;
-
-  // Preprocess: RGBA → RGB NCHW, normalize to [0, 1]
-  const imgTensor = new Float32Array(1 * 3 * planeSize);
-  for (let i = 0; i < planeSize; i++) {
+  // Reuse pre-allocated tensor buffer
+  for (let i = 0; i < SWAP_PLANE; i++) {
     const si = i * 4;
-    imgTensor[0 * planeSize + i] = alignedRGBA[si]     / 255.0;
-    imgTensor[1 * planeSize + i] = alignedRGBA[si + 1] / 255.0;
-    imgTensor[2 * planeSize + i] = alignedRGBA[si + 2] / 255.0;
+    _swapTensor[0 * SWAP_PLANE + i] = alignedRGBA[si]     / 255.0;
+    _swapTensor[1 * SWAP_PLANE + i] = alignedRGBA[si + 1] / 255.0;
+    _swapTensor[2 * SWAP_PLANE + i] = alignedRGBA[si + 2] / 255.0;
   }
 
-  const targetTensor = new ort.Tensor('float32', imgTensor, [1, 3, size, size]);
-  // Clone sourceLatent — ORT proxy mode may transfer the underlying buffer
+  const targetTensor = new ort.Tensor('float32', _swapTensor, [1, 3, SWAP_SIZE, SWAP_SIZE]);
   const sourceTensor = new ort.Tensor('float32', new Float32Array(sourceLatent), [1, 512]);
-
-  // Use named feeds (safer than positional — input order may vary)
   const feeds = { 'target': targetTensor, 'source': sourceTensor };
 
   const results = await session.run(feeds);
   const outTensor = results[session.outputNames[0]];
   const outData = outTensor.getData ? await outTensor.getData() : outTensor.data;
 
-  // Convert NCHW float32 [0,1] → RGBA uint8
-  const rgba = new Uint8ClampedArray(planeSize * 4);
-  for (let i = 0; i < planeSize; i++) {
-    rgba[i * 4]     = Math.round(outData[0 * planeSize + i] * 255);
-    rgba[i * 4 + 1] = Math.round(outData[1 * planeSize + i] * 255);
-    rgba[i * 4 + 2] = Math.round(outData[2 * planeSize + i] * 255);
-    rgba[i * 4 + 3] = 255;
+  // Reuse pre-allocated RGBA buffer
+  for (let i = 0; i < SWAP_PLANE; i++) {
+    _swapRGBA[i * 4]     = Math.round(outData[0 * SWAP_PLANE + i] * 255);
+    _swapRGBA[i * 4 + 1] = Math.round(outData[1 * SWAP_PLANE + i] * 255);
+    _swapRGBA[i * 4 + 2] = Math.round(outData[2 * SWAP_PLANE + i] * 255);
+    _swapRGBA[i * 4 + 3] = 255;
   }
-  return rgba;
+  return _swapRGBA;
 }
 
-/**
- * Project source embedding through emap matrix for inswapper input.
- * @param {Float32Array} embedding - 512-dim normed embedding
- * @param {Float32Array} emap - 512×512 matrix (row-major)
- * @returns {Float32Array} 512-dim projected and normalized latent
- */
 export function projectEmbedding(embedding, emap) {
-  // latent = embedding @ emap (row-vector × matrix: (1,512) × (512,512) → (1,512))
   const latent = vecMatMul(embedding, emap, 512, 512);
   vecNormalize(latent);
   return latent;
@@ -299,14 +239,10 @@ export function projectEmbedding(embedding, emap) {
 
 // ── Paste-Back with Blending Mask ──────────────────────────────────
 
-/**
- * Create a circular blending mask for a 128×128 face.
- * Returns a Float32Array (128×128) with soft edges.
- */
 function createSwapMask(size) {
   const mask = new Float32Array(size * size);
   const cx = size / 2, cy = size / 2;
-  const r = size * 0.42; // slightly smaller than half
+  const r = size * 0.42;
   const feather = size * 0.1;
 
   for (let y = 0; y < size; y++) {
@@ -325,20 +261,14 @@ function createSwapMask(size) {
 const SWAP_MASK_128 = createSwapMask(128);
 
 /**
- * Paste a swapped 128×128 face back into the full frame.
- *
- * @param {Uint8ClampedArray} frameRGBA - Full frame RGBA
- * @param {number} frameW
- * @param {number} frameH
- * @param {Uint8ClampedArray} swappedRGBA - 128×128 swapped face RGBA
- * @param {number[][]} M - Forward affine (used for alignment)
- * @returns {Uint8ClampedArray} Modified frame RGBA
+ * Paste swapped face back into frame. Writes directly into the output buffer.
+ * Pass an existing buffer as `outBuf` to avoid allocation, or null to create one.
  */
-export function pasteBack(frameRGBA, frameW, frameH, swappedRGBA, M) {
+export function pasteBack(frameRGBA, frameW, frameH, swappedRGBA, M, outBuf) {
   const size = 128;
   const Minv = invertAffine(M);
 
-  // Compute bounding box of the face in frame coords by projecting the 128×128 corners
+  // Compute face bounding box in frame coords
   const corners = [[0,0],[size,0],[size,size],[0,size]];
   let minX = frameW, minY = frameH, maxX = 0, maxY = 0;
   for (const [cx, cy] of corners) {
@@ -349,25 +279,24 @@ export function pasteBack(frameRGBA, frameW, frameH, swappedRGBA, M) {
     if (fy < minY) minY = fy;
     if (fy > maxY) maxY = fy;
   }
-  // Pad by 10% and clamp
   const pad = Math.max((maxX - minX), (maxY - minY)) * 0.1;
   const bx1 = Math.max(0, Math.floor(minX - pad));
   const by1 = Math.max(0, Math.floor(minY - pad));
   const bx2 = Math.min(frameW, Math.ceil(maxX + pad));
   const by2 = Math.min(frameH, Math.ceil(maxY + pad));
 
-  // Only iterate within the face bounding box (huge speedup vs full frame)
-  const out = new Uint8ClampedArray(frameRGBA);
+  // Copy frame into output (reuse buffer if provided)
+  const out = outBuf && outBuf.length === frameRGBA.length
+    ? (outBuf.set(frameRGBA), outBuf)
+    : new Uint8ClampedArray(frameRGBA);
+
   for (let y = by1; y < by2; y++) {
     for (let x = bx1; x < bx2; x++) {
-      // Inverse-map frame (x,y) → source (128×128) coords
       const sx = M[0][0] * x + M[0][1] * y + M[0][2];
       const sy = M[1][0] * x + M[1][1] * y + M[1][2];
 
-      // Skip if outside 128×128 source
       if (sx < 0 || sx >= size - 1 || sy < 0 || sy >= size - 1) continue;
 
-      // Bilinear lookup in swap mask
       const ix = Math.floor(sx), iy = Math.floor(sy);
       const fx = sx - ix, fy = sy - iy;
       const mi = iy * size + ix;
@@ -379,7 +308,6 @@ export function pasteBack(frameRGBA, frameW, frameH, swappedRGBA, M) {
 
       if (alpha < 0.001) continue;
 
-      // Bilinear lookup in swapped face
       const si4 = (iy * size + ix) * 4;
       const pi = (y * frameW + x) * 4;
       for (let c = 0; c < 3; c++) {
@@ -398,30 +326,24 @@ export function pasteBack(frameRGBA, frameW, frameH, swappedRGBA, M) {
 
 // ── BiSeNet Face Parsing ───────────────────────────────────────────
 
-/**
- * Run BiSeNet face parsing on a face crop.
- *
- * @param {ort.InferenceSession} session
- * @param {Uint8ClampedArray} cropRGBA - Face crop RGBA
- * @param {number} cropW
- * @param {number} cropH
- * @returns {Promise<Uint8Array>} Class labels (cropH × cropW), values 0-18
- */
 export async function parseFace(session, cropRGBA, cropW, cropH) {
   const size = 512;
   const planeSize = size * size;
 
-  // Resize crop to 512×512
-  const srcCanvas = new OffscreenCanvas(cropW, cropH);
-  const srcCtx = srcCanvas.getContext('2d');
-  srcCtx.putImageData(new ImageData(cropRGBA, cropW, cropH), 0, 0);
+  // Reuse cached canvases
+  if (!_parseSrcCanvas || _parseSrcCanvas.width !== cropW || _parseSrcCanvas.height !== cropH) {
+    _parseSrcCanvas = new OffscreenCanvas(cropW, cropH);
+    _parseSrcCtx = _parseSrcCanvas.getContext('2d');
+  }
+  _parseSrcCtx.putImageData(new ImageData(cropRGBA, cropW, cropH), 0, 0);
 
-  const resCanvas = new OffscreenCanvas(size, size);
-  const resCtx = resCanvas.getContext('2d');
-  resCtx.drawImage(srcCanvas, 0, 0, cropW, cropH, 0, 0, size, size);
-  const resized = resCtx.getImageData(0, 0, size, size).data;
+  if (!_parseResCanvas) {
+    _parseResCanvas = new OffscreenCanvas(size, size);
+    _parseResCtx = _parseResCanvas.getContext('2d');
+  }
+  _parseResCtx.drawImage(_parseSrcCanvas, 0, 0, cropW, cropH, 0, 0, size, size);
+  const resized = _parseResCtx.getImageData(0, 0, size, size).data;
 
-  // RGBA → RGB NCHW, normalize: (px - 127.5) / 127.5
   const tensor = new Float32Array(1 * 3 * planeSize);
   for (let i = 0; i < planeSize; i++) {
     const si = i * 4;
@@ -436,9 +358,8 @@ export async function parseFace(session, cropRGBA, cropW, cropH) {
 
   const results = await session.run(feeds);
   const outTensor = results[session.outputNames[0]];
-  const logits = outTensor.getData ? await outTensor.getData() : outTensor.data; // (1, 19, 512, 512)
+  const logits = outTensor.getData ? await outTensor.getData() : outTensor.data;
 
-  // Argmax over class dimension → (512, 512) class labels
   const labels512 = new Uint8Array(planeSize);
   for (let i = 0; i < planeSize; i++) {
     let maxVal = -Infinity, maxCls = 0;
@@ -449,7 +370,6 @@ export async function parseFace(session, cropRGBA, cropW, cropH) {
     labels512[i] = maxCls;
   }
 
-  // Resize labels back to crop size (nearest neighbor)
   const labels = new Uint8Array(cropW * cropH);
   for (let y = 0; y < cropH; y++) {
     for (let x = 0; x < cropW; x++) {
@@ -461,19 +381,9 @@ export async function parseFace(session, cropRGBA, cropW, cropH) {
   return labels;
 }
 
-/**
- * Run face parsing on the full frame, cropping around the detected face.
- * Returns a full-frame label map.
- *
- * @param {ort.InferenceSession} session
- * @param {ImageData} frameData - Full frame
- * @param {number[]} bbox - [x1, y1, x2, y2] face bbox
- * @returns {Promise<{labels: Uint8Array, cropBox: number[]}>}
- */
 export async function parseFullFrame(session, frameData, bbox) {
   const { width: W, height: H, data } = frameData;
 
-  // Pad bbox by 25%
   const bw = bbox[2] - bbox[0], bh = bbox[3] - bbox[1];
   const px = Math.round(bw * 0.25), py = Math.round(bh * 0.25);
   const x1 = Math.max(0, Math.round(bbox[0]) - px);
@@ -482,7 +392,6 @@ export async function parseFullFrame(session, frameData, bbox) {
   const y2 = Math.min(H, Math.round(bbox[3]) + py);
   const cropW = x2 - x1, cropH = y2 - y1;
 
-  // Extract crop RGBA
   const cropRGBA = new Uint8ClampedArray(cropW * cropH * 4);
   for (let row = 0; row < cropH; row++) {
     const srcOff = ((y1 + row) * W + x1) * 4;
@@ -494,30 +403,15 @@ export async function parseFullFrame(session, frameData, bbox) {
   return { labels, cropBox: [x1, y1, x2, y2], cropW, cropH };
 }
 
-/**
- * Create a feathered region mask from parsing labels.
- *
- * @param {Uint8Array} labels - Parsing labels for the crop
- * @param {number} cropW
- * @param {number} cropH
- * @param {string} region - 'nose', 'lips', 'eyes', 'brow', 'chin'
- * @param {number[]} cropBox - [x1, y1, x2, y2] in frame coords
- * @param {number[][]} kps - 5 keypoints (for chin special case)
- * @param {number} frameW
- * @param {number} frameH
- * @returns {Float32Array} Full-frame mask (frameH × frameW), values 0-1
- */
 export function createRegionMask(labels, cropW, cropH, region, cropBox, kps, frameW, frameH) {
   const classes = REGION_CLASSES[region];
   if (!classes) return null;
 
-  // Binary mask within crop
   const cropMask = new Uint8Array(cropW * cropH);
   for (let i = 0; i < cropW * cropH; i++) {
     cropMask[i] = classes.includes(labels[i]) ? 255 : 0;
   }
 
-  // Chin special case: zero out everything above mouth line
   if (region === 'chin' && kps) {
     const mouthY = (kps[3][1] + kps[4][1]) / 2;
     const localMouthY = Math.round(mouthY - cropBox[1]);
@@ -528,7 +422,6 @@ export function createRegionMask(labels, cropW, cropH, region, cropBox, kps, fra
     }
   }
 
-  // Project crop mask into full frame
   const [x1, y1] = cropBox;
   const fullMask = new Float32Array(frameW * frameH);
   for (let y = 0; y < cropH; y++) {
@@ -537,12 +430,10 @@ export function createRegionMask(labels, cropW, cropH, region, cropBox, kps, fra
     }
   }
 
-  // Gaussian blur for feathering
   const faceW = cropBox[2] - cropBox[0];
   const feather = Math.max(5, Math.round(faceW * 0.07));
   gaussianBlurInPlace(fullMask, frameW, frameH, feather);
 
-  // Renormalize to [0, 1]
   let maxVal = 0;
   for (let i = 0; i < fullMask.length; i++) if (fullMask[i] > maxVal) maxVal = fullMask[i];
   if (maxVal > 0) for (let i = 0; i < fullMask.length; i++) fullMask[i] /= maxVal;
@@ -550,18 +441,12 @@ export function createRegionMask(labels, cropW, cropH, region, cropBox, kps, fra
   return fullMask;
 }
 
-/**
- * Simple box-blur approximation of Gaussian blur (3 passes).
- * Operates in-place on a Float32Array representing a 2D grid.
- */
 function gaussianBlurInPlace(data, w, h, radius) {
   const temp = new Float32Array(w * h);
 
   for (let pass = 0; pass < 3; pass++) {
-    // Horizontal pass
     for (let y = 0; y < h; y++) {
       let sum = 0, count = 0;
-      // Initialize window
       for (let x = 0; x <= radius && x < w; x++) {
         sum += data[y * w + x];
         count++;
@@ -575,7 +460,6 @@ function gaussianBlurInPlace(data, w, h, radius) {
       }
     }
 
-    // Vertical pass
     for (let x = 0; x < w; x++) {
       let sum = 0, count = 0;
       for (let y = 0; y <= radius && y < h; y++) {
@@ -596,19 +480,16 @@ function gaussianBlurInPlace(data, w, h, radius) {
 // ── Blending & Post-Processing ─────────────────────────────────────
 
 /**
- * Blend swapped frame with original using a region mask and opacity.
- *
- * @param {Uint8ClampedArray} original - Original frame RGBA
- * @param {Uint8ClampedArray} swapped - Full-swap result RGBA
- * @param {Float32Array|null} regionMask - Per-pixel mask (0-1), null = full blend
- * @param {number} opacity - Global opacity (0-1)
- * @param {number} w
- * @param {number} h
- * @returns {Uint8ClampedArray} Blended RGBA
+ * Blend swapped frame with original. Writes into outBuf if provided.
  */
-export function blendRegion(original, swapped, regionMask, opacity, w, h) {
-  const out = new Uint8ClampedArray(original);
+export function blendRegion(original, swapped, regionMask, opacity, w, h, outBuf) {
+  const out = outBuf && outBuf.length === original.length
+    ? outBuf
+    : new Uint8ClampedArray(original.length);
   const n = w * h;
+
+  // Copy original first, then blend changed pixels
+  out.set(original);
 
   for (let i = 0; i < n; i++) {
     const alpha = (regionMask ? regionMask[i] : 1.0) * opacity;
@@ -621,14 +502,6 @@ export function blendRegion(original, swapped, regionMask, opacity, w, h) {
   return out;
 }
 
-/**
- * Apply unsharp mask sharpening.
- * @param {Uint8ClampedArray} rgba
- * @param {number} w
- * @param {number} h
- * @param {number} amount - 0-100
- * @returns {Uint8ClampedArray}
- */
 export function sharpen(rgba, w, h, amount, regionMask) {
   if (amount <= 0) return rgba;
   const strength = amount / 50.0;
@@ -636,7 +509,6 @@ export function sharpen(rgba, w, h, amount, regionMask) {
 
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
-      // Skip pixels outside the region mask if provided
       if (regionMask && regionMask[y * w + x] < 0.001) continue;
       const ci = (y * w + x) * 4;
       for (let c = 0; c < 3; c++) {

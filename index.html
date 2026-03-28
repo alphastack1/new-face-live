@@ -253,7 +253,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);heigh
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.webgpu.js"></script>
 
 <script type="module">
-import { Engine } from './js/engine.js?v=13';
+import { Engine } from './js/engine.js?v=14';
 
 // ── Reference images registry ────────────────────────────────────
 const REFS = {
@@ -411,6 +411,9 @@ let processing = false;
 let frameErrors = 0;
 let lastResult = null; // Last processed ImageData overlay
 
+// Offscreen canvas for frame capture (avoids drawing to visible canvas just to read back)
+let captureCanvas = null, captureCtx = null;
+
 function drawVideoFrame() {
   if (mirror) {
     ctx.save();
@@ -420,6 +423,22 @@ function drawVideoFrame() {
   } else {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   }
+}
+
+function captureFrame() {
+  if (!captureCanvas || captureCanvas.width !== canvas.width || captureCanvas.height !== canvas.height) {
+    captureCanvas = new OffscreenCanvas(canvas.width, canvas.height);
+    captureCtx = captureCanvas.getContext('2d');
+  }
+  if (mirror) {
+    captureCtx.save();
+    captureCtx.scale(-1, 1);
+    captureCtx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+    captureCtx.restore();
+  } else {
+    captureCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  }
+  return captureCtx.getImageData(0, 0, canvas.width, canvas.height);
 }
 
 async function processLoop() {
@@ -435,9 +454,8 @@ async function processLoop() {
   // Start inference if not already running and we have a reference
   if (!processing && engine.sourceLatent) {
     processing = true;
-    // Capture fresh video frame for inference
-    drawVideoFrame();
-    const frameData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    // Capture fresh video frame via offscreen canvas (no visible canvas round-trip)
+    const frameData = captureFrame();
 
     // Run inference async — don't block the render loop
     engine.processFrame(frameData).then(result => {
