@@ -1,29 +1,38 @@
 /**
  * NewFace Browser Engine — orchestrates the face swap pipeline.
- * Manages model loading, camera, frame processing loop.
+ * Uses a Web Worker for face detection (WASM) so it runs in parallel
+ * with the WebGPU swap on the main thread.
  */
 
-import { loadSession, loadSessionWasm, loadSessionPreferGPU, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=12';
+import { loadSession, loadSessionWasm, loadEmap, loadModelBytes, checkCache, totalModelSize } from './models.js?v=13';
 import {
   detectOneFace, alignFace, extractEmbedding, projectEmbedding,
   runSwap, pasteBack, parseFullFrame, createRegionMask,
   blendRegion, sharpen,
-} from './pipeline.js?v=12';
+} from './pipeline.js?v=13';
 
 export class Engine {
   constructor() {
-    // Models
-    this.detSession = null;
+    // Models (main thread)
+    this.detSession = null;   // WASM — only used for setReference
     this.recSession = null;
     this.swapSession = null;
     this.parseSession = null;
     this.emap = null;
 
+    // Detection worker
+    this._detWorker = null;
+    this._workerReady = false;
+    this._workerBusy = false;
+    this._workerReqId = 0;
+    this._workerCallbacks = new Map();  // id → resolve for ref detection
+    this._latestDetection = null;       // Latest face from worker
+
     // State
     this.ready = false;
     this.running = false;
-    this.sourceLatent = null;     // Projected embedding of reference face
-    this.sourceEmbedding = null;  // Raw 512-dim embedding
+    this.sourceLatent = null;
+    this.sourceEmbedding = null;
 
     // Settings
     this.region = 'nose';
@@ -31,15 +40,10 @@ export class Engine {
     this.sharpness = 0;
     this.mirror = true;
 
-    // Cached parsing (reuse across frames if face hasn't moved much)
+    // Cached parsing
     this._cachedParsing = null;
     this._cachedParsingBox = null;
     this._parseFrameCount = 0;
-
-    // Cached detection (skip detect on intermediate frames)
-    this._cachedFace = null;
-    this._detectFrameCount = 0;
-    this._detectEveryN = 3;  // Run detection every Nth frame, reuse kps otherwise
 
     // Performance
     this.fps = 0;
@@ -48,10 +52,6 @@ export class Engine {
 
   // ── Model Loading ──────────────────────────────────────────────
 
-  /**
-   * Load all models with progress reporting.
-   * @param {function} onProgress - (modelName, loaded, total, overallPct) => void
-   */
   async init(onProgress) {
     const models = ['det_10g', 'w600k_r50', 'inswapper', 'bisenet', 'emap'];
     const sizes = {
@@ -71,14 +71,18 @@ export class Engine {
       if (onProgress) onProgress(name, l, t, overallLoaded / totalSize);
     };
 
-    // Load models (sequentially to avoid memory pressure)
-    // det_10g: WASM — WebGPU AveragePool shape computation uses ceil() internally (ORT bug)
-    // w600k_r50: WASM — has ops WebGPU can't create session for (runs once, no perf impact)
-    // inswapper: WebGPU REQUIRED — runs every frame, 20s on WASM vs <100ms on GPU
-    // bisenet: WebGPU — runs every 15 frames for face parsing
-    console.log('[Engine] Loading det_10g (WASM)...');
-    this.detSession = await loadSessionWasm('det_10g', progress);
+    // 1. Load det_10g model bytes and send to worker
+    console.log('[Engine] Loading det_10g...');
+    const detBytes = await loadModelBytes('det_10g', progress);
+    await this._initDetectionWorker(detBytes);
 
+    // Also load a main-thread WASM session for setReference (infrequent)
+    console.log('[Engine] Loading det_10g (WASM, for ref detection)...');
+    this.detSession = await loadSessionWasm('det_10g', (l, t, name) => {
+      // Don't double-count progress — det_10g already reported above
+    });
+
+    // 2. Load remaining models
     console.log('[Engine] Loading w600k_r50 (WASM)...');
     this.recSession = await loadSessionWasm('w600k_r50', progress);
 
@@ -91,7 +95,7 @@ export class Engine {
     console.log('[Engine] Loading emap...');
     this.emap = await loadEmap(progress);
 
-    // Pre-warm sessions with dummy inference to trigger shader compilation
+    // Pre-warm WebGPU sessions
     console.log('[Engine] Pre-warming sessions...');
     await this._warmup();
 
@@ -99,10 +103,72 @@ export class Engine {
     console.log('[Engine] All models loaded. Ready.');
   }
 
+  async _initDetectionWorker(modelBytes) {
+    return new Promise((resolve, reject) => {
+      this._detWorker = new Worker('./js/detection-worker.js');
+
+      this._detWorker.onmessage = (e) => {
+        const { type } = e.data;
+
+        if (type === 'ready') {
+          this._workerReady = true;
+          console.log('[Engine] Detection worker ready');
+          resolve();
+        }
+        else if (type === 'result') {
+          this._workerBusy = false;
+          // If there's a callback (ref detection), resolve it
+          const cb = this._workerCallbacks.get(e.data.id);
+          if (cb) {
+            this._workerCallbacks.delete(e.data.id);
+            cb(e.data.face);
+          } else {
+            // Frame detection — store as latest result
+            this._latestDetection = e.data.face;
+          }
+        }
+        else if (type === 'error') {
+          this._workerBusy = false;
+          console.error('[Engine] Worker error:', e.data.message);
+          const cb = this._workerCallbacks.get(e.data.id);
+          if (cb) {
+            this._workerCallbacks.delete(e.data.id);
+            cb(null);
+          }
+          if (!this._workerReady) reject(new Error(e.data.message));
+        }
+      };
+
+      this._detWorker.onerror = (err) => {
+        console.error('[Engine] Worker fatal error:', err);
+        if (!this._workerReady) reject(err);
+      };
+
+      // Send model bytes to worker (transfer, zero-copy)
+      // Clone first since we also need bytes for main thread session
+      const bytesCopy = modelBytes.slice(0);
+      this._detWorker.postMessage({ type: 'init', modelBytes: bytesCopy }, [bytesCopy]);
+    });
+  }
+
+  /**
+   * Send a frame to the detection worker (fire-and-forget).
+   * The result will appear in this._latestDetection when ready.
+   */
+  _sendFrameToWorker(frameData) {
+    if (!this._workerReady || this._workerBusy) return;
+    this._workerBusy = true;
+
+    // Copy pixel data for transfer to worker
+    const pixelsCopy = frameData.data.buffer.slice(0);
+    this._detWorker.postMessage(
+      { type: 'detect', pixels: pixelsCopy, width: frameData.width, height: frameData.height, id: 0 },
+      [pixelsCopy]  // Transfer (zero-copy send)
+    );
+  }
+
   async _warmup() {
     try {
-      // Warm WebGPU sessions to trigger shader compilation
-      // (WASM sessions don't need warmup)
       const swapImg = new ort.Tensor('float32', new Float32Array(1 * 3 * 128 * 128), [1, 3, 128, 128]);
       const swapSrc = new ort.Tensor('float32', new Float32Array(512), [1, 512]);
       await this.swapSession.run({ 'target': swapImg, 'source': swapSrc });
@@ -114,28 +180,18 @@ export class Engine {
 
   // ── Reference Face ─────────────────────────────────────────────
 
-  /**
-   * Set reference face from an image element or URL.
-   * Detects the face, extracts embedding, and projects through emap.
-   *
-   * @param {HTMLImageElement|string} source - Image element or URL
-   * @returns {Promise<boolean>} True if reference was set successfully
-   */
   async setReference(source) {
     if (!this.ready) return false;
 
-    // Cancel any in-progress reference setting
     this._refVersion = (this._refVersion || 0) + 1;
     const myVersion = this._refVersion;
 
-    // Signal processFrame to stop and wait for current frame to finish
     this._settingReference = true;
     if (this._frameInProgress) {
       await this._frameInProgress;
     }
 
     try {
-      // Get image data
       let img = source;
       if (typeof source === 'string') {
         img = new Image();
@@ -147,7 +203,6 @@ export class Engine {
         });
       }
 
-      // Bail if another setReference was called while we loaded the image
       if (this._refVersion !== myVersion) return false;
 
       const canvas = new OffscreenCanvas(img.naturalWidth || img.width, img.naturalHeight || img.height);
@@ -155,7 +210,7 @@ export class Engine {
       ctx.drawImage(img, 0, 0);
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-      // Detect face
+      // Detect face using main-thread session (not the worker)
       const face = await detectOneFace(this.detSession, imgData);
       if (!face) {
         console.warn('[Engine] No face detected in reference image');
@@ -163,41 +218,31 @@ export class Engine {
       }
       if (this._refVersion !== myVersion) return false;
 
-      // Align to 112×112 for embedding
       const { data: alignedRGBA } = alignFace(
         imgData.data, imgData.width, imgData.height, face.kps, 112
       );
 
-      // Extract embedding
       this.sourceEmbedding = await extractEmbedding(this.recSession, alignedRGBA);
       if (this._refVersion !== myVersion) return false;
 
-      // Project through emap
       this.sourceLatent = projectEmbedding(this.sourceEmbedding, this.emap);
 
-      // Clear cached face so detection runs fresh with new reference
-      this._cachedFace = null;
+      // Clear caches
+      this._latestDetection = null;
       this._cachedParsing = null;
-      this._detectFrameCount = 0;
+      this._parseFrameCount = 0;
 
       console.log('[Engine] Reference face set');
       return true;
     } finally {
-      // Only clear the flag if we're still the active setReference call
       if (this._refVersion === myVersion) {
         this._settingReference = false;
       }
     }
   }
 
-  // ── Frame Processing ───────────────────────────────────────────
+  // ── Frame Processing (Pipelined) ──────────────────────────────
 
-  /**
-   * Process a single video frame: detect, swap, parse, blend.
-   *
-   * @param {ImageData} frameData - Camera frame (RGBA)
-   * @returns {Promise<ImageData|null>} Processed frame, or null if no face / no ref
-   */
   async processFrame(frameData) {
     if (!this.ready || !this.sourceLatent || this._settingReference) return null;
 
@@ -213,37 +258,39 @@ export class Engine {
   async _processFrameInner(frameData) {
     const { width: W, height: H } = frameData;
 
-    // 1. Detect face — skip on intermediate frames and reuse cached face
-    this._detectFrameCount++;
-    let face;
-    if (this._cachedFace && (this._detectFrameCount % this._detectEveryN !== 0)) {
-      face = this._cachedFace;
-    } else {
-      face = await detectOneFace(this.detSession, frameData);
-      if (!face) {
-        this._cachedFace = null;
-        return null;
-      }
-      this._cachedFace = face;
+    // Send this frame to the worker for NEXT detection (pipeline)
+    this._sendFrameToWorker(frameData);
+
+    // Use the latest detection result from the worker
+    const face = this._latestDetection;
+    if (!face) {
+      // No detection yet — run synchronously on main thread for first frame
+      const firstFace = await detectOneFace(this.detSession, frameData);
+      if (!firstFace) return null;
+      this._latestDetection = firstFace;
+      return this._processWithFace(frameData, W, H, firstFace);
     }
 
-    // 2. Align target face to 128×128 for swapper
+    return this._processWithFace(frameData, W, H, face);
+  }
+
+  async _processWithFace(frameData, W, H, face) {
+    // 1. Align target face to 128×128 for swapper
     const { data: aligned128, M } = alignFace(
       frameData.data, W, H, face.kps, 128
     );
 
-    // 3. Run face swap
+    // 2. Run face swap (WebGPU — this runs in parallel with worker detection)
     const swappedFace = await runSwap(this.swapSession, aligned128, this.sourceLatent);
 
-    // 4. Paste swapped face back into frame
+    // 3. Paste swapped face back into frame
     const fullSwapped = pasteBack(frameData.data, W, H, swappedFace, M);
 
-    // 5. Regional masking (if not full-face swap)
+    // 4. Regional masking
     let result;
     if (this.region === 'full') {
       result = blendRegion(frameData.data, fullSwapped, null, this.opacity, W, H);
     } else {
-      // Run parsing infrequently (every 15 frames or when bbox moves)
       const needsParsing = this._shouldReparse(face.bbox);
       if (needsParsing) {
         const parsed = await parseFullFrame(this.parseSession, frameData, face.bbox);
@@ -262,7 +309,7 @@ export class Engine {
       }
     }
 
-    // 6. Sharpening
+    // 5. Sharpening
     if (this.sharpness > 0) {
       result = sharpen(result, W, H, this.sharpness);
     }
@@ -278,17 +325,11 @@ export class Engine {
     return new ImageData(result, W, H);
   }
 
-  /**
-   * Determine if we need to re-run face parsing.
-   */
   _shouldReparse(bbox) {
     this._parseFrameCount++;
-
-    // Parse every 15 frames (bisenet is expensive in WASM)
     if (this._parseFrameCount % 15 !== 0) return false;
     if (!this._cachedParsingBox) return true;
 
-    // Reparse if bbox moved significantly
     const [x1, y1, x2, y2] = bbox;
     const [ox1, oy1, ox2, oy2] = this._cachedParsingBox;
     const shift = Math.abs(x1 - ox1) + Math.abs(y1 - oy1) + Math.abs(x2 - ox2) + Math.abs(y2 - oy2);
@@ -298,9 +339,6 @@ export class Engine {
 
   // ── Process Single Image (for preview) ─────────────────────────
 
-  /**
-   * Process a single still image (photo mode).
-   */
   async processImage(imageData) {
     return this.processFrame(imageData);
   }
