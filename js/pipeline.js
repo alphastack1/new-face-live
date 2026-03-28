@@ -200,6 +200,13 @@ export async function detectOneFace(session, imgData) {
 export function alignFace(srcData, srcW, srcH, kps, outSize) {
   const dst = outSize === 128 ? ARCFACE_DST_128 : ARCFACE_DST_112;
   const M = estimateSimilarityTransform(kps, dst);
+  if (!alignFace._logged) {
+    alignFace._logged = true;
+    console.log(`[Align ${outSize}] srcSize: ${srcW}x${srcH}`);
+    console.log(`[Align ${outSize}] kps:`, kps.map(p => `(${p[0].toFixed(1)},${p[1].toFixed(1)})`).join(' '));
+    console.log(`[Align ${outSize}] dst:`, dst.map(p => `(${p[0].toFixed(1)},${p[1].toFixed(1)})`).join(' '));
+    console.log(`[Align ${outSize}] M:`, JSON.stringify(M.map(r => r.map(v => v.toFixed(4)))));
+  }
   const data = warpAffine(srcData, srcW, srcH, M, outSize, outSize);
   return { data, M };
 }
