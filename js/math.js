@@ -277,3 +277,16 @@ export function matVecMul(mat, vec, rows, cols) {
   }
   return out;
 }
+
+/** vec @ mat: (1,rows) × (rows,cols) → (1,cols) — row-vector times matrix */
+export function vecMatMul(vec, mat, rows, cols) {
+  const out = new Float32Array(cols);
+  for (let j = 0; j < cols; j++) {
+    let sum = 0;
+    for (let i = 0; i < rows; i++) {
+      sum += vec[i] * mat[i * cols + j];
+    }
+    out[j] = sum;
+  }
+  return out;
+}

@@ -5,8 +5,8 @@
 
 import {
   estimateSimilarityTransform, invertAffine, affinePoint,
-  warpAffine, warpAffineMask, nms, vecNormalize, matVecMul,
-} from './math.js?v=6';
+  warpAffine, warpAffineMask, nms, vecNormalize, vecMatMul,
+} from './math.js?v=7';
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -287,8 +287,8 @@ export async function runSwap(session, alignedRGBA, sourceLatent) {
  * @returns {Float32Array} 512-dim projected and normalized latent
  */
 export function projectEmbedding(embedding, emap) {
-  // latent = embedding @ emap (matrix multiply: (1,512) × (512,512) → (1,512))
-  const latent = matVecMul(emap, embedding, 512, 512);
+  // latent = embedding @ emap (row-vector × matrix: (1,512) × (512,512) → (1,512))
+  const latent = vecMatMul(embedding, emap, 512, 512);
   vecNormalize(latent);
   return latent;
 }
