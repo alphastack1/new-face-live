@@ -34,22 +34,12 @@ const DET_NUM_ANCHORS = 2;
 const DET_SCORE_THRESH = 0.3;
 const DET_NMS_THRESH = 0.4;
 
-// Primary classes for each region
 const REGION_CLASSES = {
   nose: [10],
   lips: [11, 12, 13],
   eyes: [4, 5, 6],    // include glasses — overlaps with eyes at angles
   brow: [2, 3],
   chin: [1],
-};
-
-// Keypoint indices for spatial proximity gating (skin inclusion near feature)
-// kps: [left_eye, right_eye, nose_tip, left_mouth, right_mouth]
-const REGION_KPS = {
-  nose: [2],        // nose tip
-  lips: [3, 4],     // mouth corners
-  eyes: [0, 1],     // eye centers
-  brow: [0, 1],     // near eyes
 };
 
 // ── Pre-allocated Buffers ─────────────────────────────────────────
@@ -447,33 +437,7 @@ export function createRegionMask(labels, cropW, cropH, region, cropBox, kps, fra
     cropMask[i] = classes.includes(labels[i]) ? 255 : 0;
   }
 
-  // Include skin pixels (class 1) near the feature keypoints.
-  // This fills gaps where bisenet mislabels region edges as skin at angles.
-  const regionKps = REGION_KPS[region];
-  if (regionKps && kps) {
-    const faceW = cropBox[2] - cropBox[0];
-    const radius2 = (faceW * 0.35) ** 2;  // proximity radius ~35% of face width
-    for (let y = 0; y < cropH; y++) {
-      for (let x = 0; x < cropW; x++) {
-        const idx = y * cropW + x;
-        if (cropMask[idx] > 0) continue;  // already included
-        if (labels[idx] !== 1) continue;   // not skin
-        // Check proximity to any relevant keypoint
-        const px = cropBox[0] + x;
-        const py = cropBox[1] + y;
-        for (const ki of regionKps) {
-          const dx = px - kps[ki][0];
-          const dy = py - kps[ki][1];
-          if (dx * dx + dy * dy < radius2) {
-            cropMask[idx] = 255;
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  // Dilate mask to fill small gaps from bisenet mislabeling
+  // Dilate mask to fill small gaps from bisenet mislabeling at edges
   if (!_dilateBuf || _dilateBuf.length < cropLen) {
     _dilateBuf = new Uint8Array(cropLen);
   }
@@ -521,7 +485,7 @@ export function createRegionMask(labels, cropW, cropH, region, cropBox, kps, fra
   }
 
   const faceW = cropBox[2] - cropBox[0];
-  const feather = Math.max(5, Math.round(faceW * 0.07));
+  const feather = Math.max(5, Math.round(faceW * 0.10));
   gaussianBlurInPlace(fullMask, frameW, frameH, feather);
 
   let maxVal = 0;
