@@ -44,7 +44,7 @@ export class Engine {
     // Settings
     this.region = 'nose';
     this.opacity = 0.7;
-    this.sharpness = 0;
+    this.sharpness = 50;
     this.mirror = true;
 
     // Cached parsing
