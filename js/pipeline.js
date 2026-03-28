@@ -269,6 +269,15 @@ export async function runSwap(session, alignedRGBA, sourceLatent) {
   const results = await session.run(feeds);
   const outData = results[session.outputNames[0]].data;
 
+  // Debug: check model output
+  const inSample = [imgTensor[0], imgTensor[1], imgTensor[2], imgTensor[planeSize], imgTensor[planeSize+1]];
+  const outSample = [outData[0], outData[1], outData[2], outData[planeSize], outData[planeSize+1]];
+  const latSample = [sourceLatent[0], sourceLatent[1], sourceLatent[2], sourceLatent[3]];
+  console.log('[Swap Debug] input sample:', inSample.map(v => v.toFixed(4)));
+  console.log('[Swap Debug] output sample:', outSample.map(v => v.toFixed(4)));
+  console.log('[Swap Debug] latent sample:', latSample.map(v => v.toFixed(4)));
+  console.log('[Swap Debug] output range:', Math.min(...outData.slice(0, 100)).toFixed(4), 'to', Math.max(...outData.slice(0, 100)).toFixed(4));
+
   // Convert NCHW float32 [0,1] → RGBA uint8
   const rgba = new Uint8ClampedArray(planeSize * 4);
   for (let i = 0; i < planeSize; i++) {
