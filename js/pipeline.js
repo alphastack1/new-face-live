@@ -269,21 +269,45 @@ export async function runSwap(session, alignedRGBA, sourceLatent) {
   // Use named feeds (safer than positional — input order may vary)
   const feeds = { 'target': targetTensor, 'source': sourceTensor };
 
-  const results = await session.run(feeds);
+  // One-time fixed-input test to compare WebGPU vs Python CPU
+  if (!runSwap._fixedTestDone) {
+    runSwap._fixedTestDone = true;
+    console.log('[FIXED TEST] Running with known inputs...');
+    const fixedImg = new Float32Array(1 * 3 * planeSize);
+    fixedImg.fill(0.5); // uniform grey
+    const fixedLat = new Float32Array(512);
+    // Simple known pattern: [0.044, 0.044, 0.044, ...]  (≈ normalized 512-dim)
+    for (let i = 0; i < 512; i++) fixedLat[i] = 1.0 / Math.sqrt(512);
+    const fixedTarget = new ort.Tensor('float32', fixedImg, [1, 3, size, size]);
+    const fixedSource = new ort.Tensor('float32', fixedLat, [1, 512]);
+    const fixedResults = await session.run({ 'target': fixedTarget, 'source': fixedSource });
+    const fixedOut = fixedResults[session.outputNames[0]];
+    const fixedData = fixedOut.getData ? await fixedOut.getData() : fixedOut.data;
+    // Log first 20 values of each channel
+    const r20 = Array.from(fixedData.slice(0, 20)).map(v => v.toFixed(4));
+    const g20 = Array.from(fixedData.slice(planeSize, planeSize + 20)).map(v => v.toFixed(4));
+    const b20 = Array.from(fixedData.slice(planeSize * 2, planeSize * 2 + 20)).map(v => v.toFixed(4));
+    console.log('[FIXED TEST] R[0:20]:', r20.join(', '));
+    console.log('[FIXED TEST] G[0:20]:', g20.join(', '));
+    console.log('[FIXED TEST] B[0:20]:', b20.join(', '));
 
-  // CRITICAL: For WebGPU sessions, .data may not sync from GPU.
-  // Use .getData() which properly downloads GPU → CPU.
+    // Also test with ZERO latent to see if model uses it at all
+    const zeroLat = new Float32Array(512); // all zeros
+    const zeroSource = new ort.Tensor('float32', zeroLat, [1, 512]);
+    const zeroResults = await session.run({ 'target': fixedTarget, 'source': zeroSource });
+    const zeroOut = zeroResults[session.outputNames[0]];
+    const zeroData = zeroOut.getData ? await zeroOut.getData() : zeroOut.data;
+    const zr20 = Array.from(zeroData.slice(0, 20)).map(v => v.toFixed(4));
+    console.log('[FIXED TEST] Zero-latent R[0:20]:', zr20.join(', '));
+    // Check if latent matters
+    let latentDiff = 0;
+    for (let i = 0; i < fixedData.length; i++) latentDiff += Math.abs(fixedData[i] - zeroData[i]);
+    console.log('[FIXED TEST] Latent impact (total abs diff):', latentDiff.toFixed(4));
+  }
+
+  const results = await session.run(feeds);
   const outTensor = results[session.outputNames[0]];
   const outData = outTensor.getData ? await outTensor.getData() : outTensor.data;
-
-  // Debug: check model output
-  const inSample = [imgTensor[0], imgTensor[1], imgTensor[2], imgTensor[planeSize], imgTensor[planeSize+1]];
-  const outSample = [outData[0], outData[1], outData[2], outData[planeSize], outData[planeSize+1]];
-  const latSample = [sourceLatent[0], sourceLatent[1], sourceLatent[2], sourceLatent[3]];
-  console.log('[Swap Debug] input sample:', inSample.map(v => v.toFixed(4)));
-  console.log('[Swap Debug] output sample:', outSample.map(v => v.toFixed(4)));
-  console.log('[Swap Debug] latent sample:', latSample.map(v => v.toFixed(4)));
-  console.log('[Swap Debug] output range:', Math.min(...outData.slice(0, 100)).toFixed(4), 'to', Math.max(...outData.slice(0, 100)).toFixed(4));
 
   // Convert NCHW float32 [0,1] → RGBA uint8
   const rgba = new Uint8ClampedArray(planeSize * 4);
