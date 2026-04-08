@@ -45,7 +45,7 @@ export class Engine {
     this._processingFrame = false;  // Single-concurrency guard
 
     // Settings
-    this.region = 'nose';
+    this.region = 'full';
     this.opacity = 0.7;
     this.sharpness = 50;
     this.mirror = true;

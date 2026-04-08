@@ -22,6 +22,9 @@ desktop.ini
 .idea/
 *.swp
 
+# Hidden / private
+HIDDEN/
+
 # Misc
 *.log
 ffmpeg_local/
