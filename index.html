@@ -565,8 +565,7 @@ window.setCat = function(cat) {
   });
   renderRefs();
 
-  // Auto-set region to match category
-  setRegion(cat);
+  // Keep region as-is when switching categories (always starts on 'full')
 };
 
 function renderRefs() {
@@ -611,7 +610,6 @@ async function selectRef(fn) {
 // ── Preferences (localStorage) ──────────────────────────────────
 function savePrefs() {
   localStorage.setItem('nf_prefs', JSON.stringify({
-    region: engine.region,
     opacity: Math.round(engine.opacity * 100),
     sharpness: engine.sharpness,
     mirror: mirror,
@@ -625,7 +623,7 @@ function loadPrefs() {
     const p = JSON.parse(localStorage.getItem('nf_prefs'));
     if (!p) return;
 
-    if (p.region) setRegion(p.region);
+    // Region always starts as 'full' — don't restore from prefs
     if (p.opacity != null) {
       document.getElementById('opacitySlider').value = p.opacity;
       setOpacity(p.opacity);
